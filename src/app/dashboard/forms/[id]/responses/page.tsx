@@ -24,6 +24,7 @@ export default function FormResponsesPage() {
   }
 
   async function exportCSV() {
+    // Get form fields
     const { data: fields } = await supabase
       .from('form_fields')
       .select('*')
@@ -31,6 +32,7 @@ export default function FormResponsesPage() {
       .order('order_index');
     if (!fields) return;
 
+    // Get responses with items
     const { data: allResponses } = await supabase
       .from('responses')
       .select('*, response_items(*)')
@@ -38,6 +40,7 @@ export default function FormResponsesPage() {
       .order('submitted_at', { ascending: false });
     if (!allResponses) return;
 
+    // Build CSV
     const headers = ['Response ID', 'Submitted At', ...fields.map(f => f.label)];
     const rows = allResponses.map(r => {
       const itemsMap = new Map((r as any).response_items.map((i: any) => [i.form_field_id, i]));
@@ -54,6 +57,7 @@ export default function FormResponsesPage() {
 
     const csv = [headers, ...rows].map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
 
+    // Download
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -94,7 +98,7 @@ export default function FormResponsesPage() {
                   <div key={item.id} className="text-sm">
                     <span className="font-medium text-gray-600">{item.form_fields?.label || 'Champ'}:</span>{' '}
                     <span className={item.is_pseudonymized ? 'text-yellow-600 italic' : 'text-gray-900'}>
-                      {item.is_pseudonymized ? item.anonymized_value : item.raw_value}
+                      {item.is_pseudonymized? item.anonymized_value : item.raw_value}
                     </span>
                   </div>
                 ))}
