@@ -17,23 +17,25 @@ export async function POST(req: NextRequest) {
     const userId = authData.user?.id;
     if (!userId) return NextResponse.json({ error: 'Registration failed' }, { status: 500 });
 
-    // 2. Create tenant
-    const { data: tenant, error: tenantError } = await supabase
-      .from('tenants')
-      .insert({ name: tenantName || `${name}'s Organization` })
-      .select()
-      .single();
+    // 2. Create tenant and link user via SECURITY DEFINER function (bypasses RLS)
+    const { data: tenant, error: tenantError } = await supabase.rpc('register_tenant', {
+      p_user_id: userId,
+      p_tenant_name: tenantName || `${name}'s Organization`,
+    });
     if (tenantError) return NextResponse.json({ error: tenantError.message }, { status: 500 });
 
-    // 3. Link user to tenant as admin
-    await supabase.from('tenant_users').insert({
-      tenant_id: tenant.id,
-      user_id: userId,
-      role: 'admin',
+    // 3. Auto sign-in the user
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
     });
+    if (signInError) {
+      // Registration succeeded but auto-login failed - redirect to login page
+      return NextResponse.json({ user: authData.user, tenant, needsLogin: true }, { status: 201 });
+    }
 
     return NextResponse.json({ user: authData.user, tenant }, { status: 201 });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    return NextResponse.json({ error: e.message || 'Internal server error' }, { status: 500 });
   }
 }

@@ -23,8 +23,8 @@ export default function RegisterPage() {
         body: JSON.stringify({ name, email, password, tenantName }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      router.push('/login');
+      if (!res.ok) throw new Error(data.error || 'Erreur lors de la création du compte');
+      router.push(data.needsLogin ? '/login' : '/dashboard/projects');
     } catch (e: any) {
       setError(e.message);
     } finally {
