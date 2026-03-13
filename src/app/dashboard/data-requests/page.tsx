@@ -1,28 +1,43 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { useTenant } from '@/lib/hooks/useTenant';
 
 interface DSR { id: string; requester_email: string; request_type: string; status: string; notes: string | null; created_at: string; resolved_at: string | null; }
 
 export default function DataRequestsPage() {
+  const { tenant, supabase } = useTenant();
   const [requests, setRequests] = useState<DSR[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ requester_email: '', request_type: 'access', notes: '' });
 
-  useEffect(() => { fetchRequests(); }, []);
+  useEffect(() => {
+    if (tenant) fetchRequests();
+  }, [tenant]);
 
   async function fetchRequests() {
-    const res = await fetch('/api/data-requests');
-    if (res.ok) setRequests(await res.json());
+    const { data, error } = await supabase
+      .from('data_subject_requests')
+      .select('*')
+      .eq('tenant_id', tenant!.tenant_id)
+      .order('created_at', { ascending: false });
+    if (!error && data) setRequests(data as DSR[]);
   }
 
   async function createRequest(e: React.FormEvent) {
     e.preventDefault();
-    const res = await fetch('/api/data-requests', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
-    });
-    if (res.ok) { setShowForm(false); setForm({ requester_email: '', request_type: 'access', notes: '' }); fetchRequests(); }
+    const { error } = await supabase
+      .from('data_subject_requests')
+      .insert({
+        tenant_id: tenant!.tenant_id,
+        requester_email: form.requester_email,
+        request_type: form.request_type,
+        notes: form.notes,
+      });
+    if (!error) {
+      setShowForm(false);
+      setForm({ requester_email: '', request_type: 'access', notes: '' });
+      fetchRequests();
+    }
   }
 
   const typeLabels: Record<string, string> = { access: 'Accès', delete: 'Suppression', rectification: 'Rectification', portability: 'Portabilité', objection: 'Opposition' };
