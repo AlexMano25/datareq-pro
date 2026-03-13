@@ -4,8 +4,13 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 const navItems = [
+  { href: '/dashboard/analytics', label: 'Tableau de bord', icon: '📊' },
   { href: '/dashboard/projects', label: 'Projets', icon: '📁' },
   { href: '/dashboard/data-requests', label: 'Demandes RGPD', icon: '🔒' },
+  { href: '/dashboard/legal-rules', label: 'Base juridique', icon: '⚖️' },
+  { href: '/dashboard/audit', label: 'Journal d\'audit', icon: '📝' },
+  { href: '/dashboard/team', label: 'Équipe', icon: '👥' },
+  { href: '/dashboard/settings', label: 'Paramètres', icon: '⚙️' },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -24,18 +29,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {/* Sidebar */}
       <aside className={`${sidebarOpen ? 'w-64' : 'w-16'} bg-blue-900 text-white transition-all duration-300 flex flex-col`}>
         <div className="p-4 border-b border-blue-800">
-          <h1 className={`font-bold ${sidebarOpen ? 'text-xl' : 'text-xs text-center'}`}>
+          <Link href="/dashboard/analytics" className={`font-bold block ${sidebarOpen ? 'text-xl' : 'text-xs text-center'}`}>
             {sidebarOpen ? 'DataReq Pro' : 'DR'}
-          </h1>
+          </Link>
         </div>
-        <nav className="flex-1 p-2 space-y-1">
+        <nav className="flex-1 p-2 space-y-1 overflow-y-auto">
           {navItems.map(item => (
             <Link key={item.href} href={item.href}
               className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
                 pathname.startsWith(item.href) ? 'bg-blue-700 text-white' : 'text-blue-200 hover:bg-blue-800'
               }`}>
               <span>{item.icon}</span>
-              {sidebarOpen && <span>{item.label}</span>}
+              {sidebarOpen && <span className="text-sm">{item.label}</span>}
             </Link>
           ))}
         </nav>
@@ -51,7 +56,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       </aside>
       {/* Main content */}
-      <main className="flex-1 overflow-auto">
+      <main className="flex-1 overflow-auto bg-gray-50">
         <div className="p-6 max-w-7xl mx-auto">{children}</div>
       </main>
     </div>
