@@ -2,6 +2,13 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { createBrowserClient } from '@supabase/ssr';
+
+const supabase = createBrowserClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  { db: { schema: 'datareq' } }
+);
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -15,13 +22,11 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (signInError) throw new Error(signInError.message);
       router.push('/dashboard/projects');
       router.refresh();
     } catch (e: any) {

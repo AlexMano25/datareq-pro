@@ -1,6 +1,8 @@
 import { createServerSupabase } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
 
+export const maxDuration = 30; // Allow up to 30s for cross-region calls
+
 export async function POST(req: NextRequest) {
   try {
     const { email, password, name, tenantName } = await req.json();
@@ -24,17 +26,8 @@ export async function POST(req: NextRequest) {
     });
     if (tenantError) return NextResponse.json({ error: tenantError.message }, { status: 500 });
 
-    // 3. Auto sign-in the user
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (signInError) {
-      // Registration succeeded but auto-login failed - redirect to login page
-      return NextResponse.json({ user: authData.user, tenant, needsLogin: true }, { status: 201 });
-    }
-
-    return NextResponse.json({ user: authData.user, tenant }, { status: 201 });
+    // 3. Redirect to login (skip auto-signin to save time)
+    return NextResponse.json({ user: authData.user, tenant, needsLogin: true }, { status: 201 });
   } catch (e: any) {
     return NextResponse.json({ error: e.message || 'Internal server error' }, { status: 500 });
   }

@@ -2,6 +2,13 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { createBrowserClient } from '@supabase/ssr';
+
+const supabase = createBrowserClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  { db: { schema: 'datareq' } }
+);
 
 export default function RegisterPage() {
   const [name, setName] = useState('');
@@ -17,14 +24,36 @@ export default function RegisterPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, password, tenantName }),
+      // 1. Sign up user (client-side, no serverless timeout)
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { name } },
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Erreur lors de la création du compte');
-      router.push(data.needsLogin ? '/login' : '/dashboard/projects');
+      if (authError) throw new Error(authError.message);
+
+      const userId = authData.user?.id;
+      if (!userId) throw new Error('Échec de la création du compte');
+
+      // 2. Create tenant via SECURITY DEFINER function
+      const { error: tenantError } = await supabase.rpc('register_tenant', {
+        p_user_id: userId,
+        p_tenant_name: tenantName || `${name}'s Organization`,
+      });
+      if (tenantError) throw new Error(tenantError.message);
+
+      // 3. Sign in immediately
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (signInError) {
+        // If auto-login fails (email confirmation required), redirect to login
+        router.push('/login');
+        return;
+      }
+
+      router.push('/dashboard/projects');
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -47,7 +76,7 @@ export default function RegisterPage() {
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Nom de l'organisation</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Nom de l&apos;organisation</label>
             <input type="text" value={tenantName} onChange={e => setTenantName(e.target.value)} required
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
           </div>
