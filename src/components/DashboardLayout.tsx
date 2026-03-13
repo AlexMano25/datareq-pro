@@ -2,17 +2,15 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
-import SubscriptionGate from '@/components/SubscriptionGate';
 
 const navItems = [
-  { href: '/dashboard/analytics', label: 'Tableau de bord', icon: 'ð' },
-  { href: '/dashboard/projects', label: 'Projets', icon: 'ð' },
-  { href: '/dashboard/data-requests', label: 'Demandes RGPD', icon: 'ð' },
-  { href: '/dashboard/legal-rules', label: 'Base juridique', icon: 'âï¸' },
-  { href: '/dashboard/audit', label: 'Journal d\'audit', icon: 'ð' },
-  { href: '/dashboard/team', label: 'Ãquipe', icon: 'ð¥' },
-  { href: '/dashboard/billing', label: 'Facturation', icon: 'ð³' },
-  { href: '/dashboard/settings', label: 'ParamÃ¨tres', icon: 'âï¸' },
+  { href: '/dashboard/analytics', label: 'Tableau de bord', icon: '📊' },
+  { href: '/dashboard/projects', label: 'Projets', icon: '📁' },
+  { href: '/dashboard/data-requests', label: 'Demandes RGPD', icon: '🔒' },
+  { href: '/dashboard/legal-rules', label: 'Base juridique', icon: '⚖️' },
+  { href: '/dashboard/audit', label: 'Journal d\'audit', icon: '📝' },
+  { href: '/dashboard/team', label: 'Équipe', icon: '👥' },
+  { href: '/dashboard/settings', label: 'Paramètres', icon: '⚙️' },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -49,19 +47,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="p-4 border-t border-blue-800 space-y-2">
           <button onClick={() => setSidebarOpen(!sidebarOpen)}
             className="w-full text-blue-300 hover:text-white text-sm text-left">
-            {sidebarOpen ? 'â RÃ©duire' : 'â'}
+            {sidebarOpen ? '← Réduire' : '→'}
           </button>
           <button onClick={handleLogout}
             className="w-full text-red-300 hover:text-red-100 text-sm text-left">
-            {sidebarOpen ? 'DÃ©connexion' : 'â»'}
+            {sidebarOpen ? 'Déconnexion' : '⏻'}
           </button>
         </div>
       </aside>
       {/* Main content */}
       <main className="flex-1 overflow-auto bg-gray-50">
-        <SubscriptionGate>
-          <div className="p-6 max-w-7xl mx-auto">{children}</div>
-        </SubscriptionGate>
+        <div className="p-6 max-w-7xl mx-auto">{children}</div>
       </main>
     </div>
   );
