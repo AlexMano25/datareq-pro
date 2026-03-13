@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useTenant } from '@/lib/hooks/useTenant';
 
 interface Form { id: string; name: string; status: string; is_public: boolean; public_token: string; created_at: string; }
 interface Project { id: string; name: string; description: string; geography: string; objectives: string; status: string; forms: Form[]; }
@@ -9,29 +10,41 @@ interface Project { id: string; name: string; description: string; geography: st
 export default function ProjectDetailPage() {
   const { id } = useParams();
   const router = useRouter();
+  const { tenant, supabase } = useTenant();
   const [project, setProject] = useState<Project | null>(null);
   const [showFormCreate, setShowFormCreate] = useState(false);
   const [formData, setFormData] = useState({ name: '', description: '' });
 
-  useEffect(() => { fetchProject(); }, [id]);
+  useEffect(() => {
+    if (tenant) fetchProject();
+  }, [tenant, id]);
 
   async function fetchProject() {
-    const res = await fetch(`/api/projects/${id}`);
-    if (res.ok) setProject(await res.json());
+    const { data, error } = await supabase
+      .from('projects')
+      .select('*, forms(*)')
+      .eq('id', id as string)
+      .eq('tenant_id', tenant!.tenant_id)
+      .single();
+    if (!error && data) setProject(data as any);
   }
 
   async function createForm(e: React.FormEvent) {
     e.preventDefault();
-    const res = await fetch(`/api/projects/${id}/forms`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(formData),
-    });
-    if (res.ok) {
-      const newForm = await res.json();
+    const { data, error } = await supabase
+      .from('forms')
+      .insert({
+        tenant_id: tenant!.tenant_id,
+        project_id: id as string,
+        name: formData.name,
+        description: formData.description,
+      })
+      .select()
+      .single();
+    if (!error && data) {
       setShowFormCreate(false);
       setFormData({ name: '', description: '' });
-      router.push(`/dashboard/forms/${newForm.id}/builder`);
+      router.push(`/dashboard/forms/${data.id}/builder`);
     }
   }
 
