@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
+import { useTenant } from '@/lib/hooks/useTenant';
 
 interface FormField {
   id: string; label: string; field_type: string; required: boolean; is_pii: boolean; order_index: number; metadata: any;
@@ -23,6 +24,7 @@ const FIELD_TYPES = [
 
 export default function FormBuilderPage() {
   const { id } = useParams();
+  const { tenant, supabase } = useTenant();
   const [form, setForm] = useState<FormData | null>(null);
   const [newField, setNewField] = useState({ label: '', field_type: 'text', required: false, is_pii: false, metadata: {} as any });
   const [showAddField, setShowAddField] = useState(false);
@@ -30,11 +32,23 @@ export default function FormBuilderPage() {
   const [copied, setCopied] = useState(false);
   const [selectOptions, setSelectOptions] = useState('');
 
-  useEffect(() => { fetchForm(); }, [id]);
+  useEffect(() => {
+    if (tenant) fetchForm();
+  }, [tenant, id]);
 
   async function fetchForm() {
-    const res = await fetch(`/api/forms/${id}`);
-    if (res.ok) setForm(await res.json());
+    const { data, error } = await supabase
+      .from('forms')
+      .select('*, form_fields(*)')
+      .eq('id', id as string)
+      .eq('tenant_id', tenant!.tenant_id)
+      .single();
+    if (!error && data) {
+      if (data.form_fields) {
+        (data.form_fields as any[]).sort((a: any, b: any) => a.order_index - b.order_index);
+      }
+      setForm(data as any);
+    }
   }
 
   async function addField(e: React.FormEvent) {
@@ -43,12 +57,28 @@ export default function FormBuilderPage() {
     if (['select', 'multiselect'].includes(newField.field_type) && selectOptions) {
       fieldData.metadata = { options: selectOptions.split(',').map(o => o.trim()) };
     }
-    const res = await fetch(`/api/forms/${id}/fields`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(fieldData),
-    });
-    if (res.ok) {
+
+    const { data: existingFields } = await supabase
+      .from('form_fields')
+      .select('order_index')
+      .eq('form_id', id as string)
+      .order('order_index', { ascending: false })
+      .limit(1);
+    const nextOrder = existingFields && existingFields.length > 0 ? existingFields[0].order_index + 1 : 0;
+
+    const { error } = await supabase
+      .from('form_fields')
+      .insert({
+        form_id: id as string,
+        label: fieldData.label,
+        field_type: fieldData.field_type,
+        required: fieldData.required,
+        is_pii: fieldData.is_pii,
+        order_index: nextOrder,
+        metadata: fieldData.metadata || {},
+      });
+
+    if (!error) {
       setNewField({ label: '', field_type: 'text', required: false, is_pii: false, metadata: {} });
       setSelectOptions('');
       setShowAddField(false);
@@ -57,17 +87,17 @@ export default function FormBuilderPage() {
   }
 
   async function deleteField(fieldId: string) {
-    await fetch(`/api/form-fields/${fieldId}`, { method: 'DELETE' });
+    await supabase.from('form_fields').delete().eq('id', fieldId);
     fetchForm();
   }
 
   async function publishForm() {
     setPublishing(true);
-    await fetch(`/api/forms/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'published', is_public: true }),
-    });
+    await supabase
+      .from('forms')
+      .update({ status: 'published', is_public: true, updated_at: new Date().toISOString() })
+      .eq('id', id as string)
+      .eq('tenant_id', tenant!.tenant_id);
     fetchForm();
     setPublishing(false);
   }
@@ -106,7 +136,6 @@ export default function FormBuilderPage() {
         </div>
       </div>
 
-      {/* Fields list */}
       <div className="space-y-3 mb-6">
         {form.form_fields.map((field, index) => (
           <div key={field.id} className="bg-white rounded-xl shadow p-4 flex justify-between items-center">
@@ -126,7 +155,6 @@ export default function FormBuilderPage() {
         ))}
       </div>
 
-      {/* Add field form */}
       {showAddField ? (
         <form onSubmit={addField} className="bg-white rounded-xl shadow p-6 space-y-4">
           <h3 className="font-semibold text-gray-900">Ajouter un champ</h3>
