@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useTenant } from '@/lib/hooks/useTenant';
 
 interface Project {
   id: string;
@@ -12,27 +13,39 @@ interface Project {
 }
 
 export default function ProjectsPage() {
+  const { tenant, loading: tenantLoading, supabase } = useTenant();
   const [projects, setProjects] = useState<Project[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: '', description: '', geography: '', objectives: '' });
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { fetchProjects(); }, []);
+  useEffect(() => {
+    if (tenant) fetchProjects();
+  }, [tenant]);
 
   async function fetchProjects() {
-    const res = await fetch('/api/projects');
-    if (res.ok) setProjects(await res.json());
+    const { data, error } = await supabase
+      .from('projects')
+      .select('*')
+      .eq('tenant_id', tenant!.tenant_id)
+      .order('created_at', { ascending: false });
+    if (!error && data) setProjects(data);
     setLoading(false);
   }
 
   async function createProject(e: React.FormEvent) {
     e.preventDefault();
-    const res = await fetch('/api/projects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
-    });
-    if (res.ok) {
+    const { error } = await supabase
+      .from('projects')
+      .insert({
+        tenant_id: tenant!.tenant_id,
+        name: form.name,
+        description: form.description,
+        geography: form.geography,
+        objectives: form.objectives,
+        created_by: tenant!.user_id,
+      });
+    if (!error) {
       setShowForm(false);
       setForm({ name: '', description: '', geography: '', objectives: '' });
       fetchProjects();
@@ -45,6 +58,8 @@ export default function ProjectsPage() {
     completed: 'bg-blue-100 text-blue-700',
     archived: 'bg-yellow-100 text-yellow-700',
   };
+
+  if (tenantLoading || loading) return <div className="text-center py-12 text-gray-400">Chargement...</div>;
 
   return (
     <div>
@@ -90,9 +105,7 @@ export default function ProjectsPage() {
         </form>
       )}
 
-      {loading ? (
-        <div className="text-center py-12 text-gray-400">Chargement...</div>
-      ) : projects.length === 0 ? (
+      {projects.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-xl shadow">
           <p className="text-gray-500 text-lg">Aucun projet pour le moment</p>
           <p className="text-gray-400 mt-2">Créez votre premier projet pour commencer</p>
