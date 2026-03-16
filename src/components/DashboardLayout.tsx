@@ -24,14 +24,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   async function handleLogout() {
     setLoggingOut(true);
     try {
+      // 1. Sign out client-side (clear in-memory tokens)
       const supabase = createClient();
       await supabase.auth.signOut();
+      // 2. Sign out server-side (delete cookies)
       await fetch('/api/auth/logout', { method: 'POST' });
-      router.push('/login');
-      router.refresh();
     } catch {
-      window.location.href = '/login';
+      // ignore errors
     }
+    // 3. Hard redirect to force full page reload (clears all cached state)
+    window.location.href = '/login';
   }
 
   return (
