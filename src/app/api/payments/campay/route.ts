@@ -48,8 +48,8 @@ export async function POST(request: NextRequest) {
         .single();
       plan = planData;
       if (plan) {
-        planName = plan.name;
-        if (!amountEur) amountEur = plan.price_cents / 100;
+        planName = plan.display_name || plan.name;
+        if (!amountEur) amountEur = plan.price_monthly / 100;
       }
     }
 
@@ -59,19 +59,22 @@ export async function POST(request: NextRequest) {
 
     const amountCents = Math.round(amountEur * 100);
     const amountXaf = eurToXaf(amountEur);
-    const externalRef = `DR-${tenant_id}-${subscription_id || 'deposit'}-${Date.now()}`;
+    const externalRef = `DR-${tenant_id.substring(0, 8)}-${Date.now()}`;
+    const invoiceNumber = `INV-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
 
     // Normalize payment method for storage
     const isMobileMoney = payment_method === 'mobile_money' || payment_method === 'orange_money';
     const storedPaymentMethod = isMobileMoney ? 'campay_om' : 'campay_card';
     const invoiceDescription = description || (plan ? `Abonnement DataReq Pro - Plan ${planName}` : `Recharge compte DataReq Pro`);
 
-    // Create pending invoice in database
+    // Create invoice in database
+    // DB schema: amount (int), status CHECK (draft/open/paid/void/uncollectible), invoice_number (text NOT NULL)
     const invoiceData: Record<string, unknown> = {
       tenant_id,
-      amount_cents: amountCents,
-      currency: 'EUR',
-      status: 'pending',
+      invoice_number: invoiceNumber,
+      amount: amountCents,
+      currency: 'eur',
+      status: 'open',
       description: invoiceDescription,
       payment_method: storedPaymentMethod,
       external_reference: externalRef,

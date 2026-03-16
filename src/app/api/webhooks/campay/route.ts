@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Skip if already processed
-    if (invoice.status === 'paid' || invoice.status === 'failed') {
+    if (invoice.status === 'paid' || invoice.status === 'void') {
       return NextResponse.json({ message: 'Already processed', status: invoice.status });
     }
 
@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
       await supabase
         .from('invoices')
         .update({
-          status: 'failed',
+          status: 'void',
           campay_reference: reference || invoice.campay_reference,
         })
         .eq('id', invoice.id);

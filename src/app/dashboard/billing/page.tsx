@@ -10,7 +10,7 @@ type ModalMode = 'plan' | 'deposit';
 interface Plan {
   id: string;
   name: string;
-  price_cents: number;
+  price_monthly: number;
   billing_period: string;
   max_projects: number;
   max_forms: number;
@@ -21,7 +21,7 @@ interface Plan {
 interface Invoice {
   id: string;
   invoice_number: string;
-  amount_cents: number;
+  amount: number;
   amount_xaf?: number;
   status: string;
   created_at: string;
@@ -58,7 +58,7 @@ export default function BillingPage() {
       const tid = subscription?.tenant_id || user?.user_metadata?.tenant_id;
       if (tid) setTenant(tid);
 
-      const { data: plansData } = await supabase.from('plans').select('*').order('price_cents');
+      const { data: plansData } = await supabase.from('plans').select('*').order('price_monthly');
       if (plansData) setPlans(plansData);
 
       if (tid) {
@@ -86,8 +86,8 @@ export default function BillingPage() {
   // Calculate balance from invoices
   const balance = invoices.reduce((acc, inv) => {
     if (inv.status !== 'paid') return acc;
-    if (inv.description?.toLowerCase().includes('recharge')) return acc + inv.amount_cents;
-    return acc - inv.amount_cents;
+    if (inv.description?.toLowerCase().includes('recharge')) return acc + inv.amount;
+    return acc - inv.amount;
   }, 0);
   const balanceEur = balance / 100;
   const balanceXaf = Math.round(balanceEur * 655.957);
@@ -110,7 +110,7 @@ export default function BillingPage() {
       return customAmount ? parseFloat(customAmount) : depositAmount;
     }
     const sp = plans.find(p => p.id === selectedPlan);
-    return sp ? sp.price_cents / 100 : 0;
+    return sp ? sp.price_monthly / 100 : 0;
   };
 
   const submitPayment = async () => {
@@ -197,9 +197,9 @@ export default function BillingPage() {
           <p className={`text-2xl font-bold ${plan ? 'text-blue-600' : 'text-red-500'}`}>
             {plan ? plan.name : 'Aucun plan'}
           </p>
-          {plan && plan.price_cents > 0 && (
+          {plan && plan.price_monthly > 0 && (
             <p className="text-sm text-gray-400 mt-1">
-              {(plan.price_cents / 100).toFixed(0)} \u20AC/mois ~ {Math.round((plan.price_cents / 100) * 655.957).toLocaleString()} FCFA
+              {(plan.price_monthly / 100).toFixed(0)} \u20AC/mois ~ {Math.round((plan.price_monthly / 100) * 655.957).toLocaleString()} FCFA
             </p>
           )}
           {subscription?.status === 'trialing' && (
@@ -253,10 +253,10 @@ export default function BillingPage() {
             <div key={p.id} className={`border rounded-lg p-4 ${p.id === plan?.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-blue-300'}`}>
               <h3 className="font-bold text-lg">{p.name}</h3>
               <p className="text-2xl font-bold text-blue-600 mt-2">
-                {p.price_cents > 0 ? `${(p.price_cents / 100).toFixed(0)} \u20AC` : 'Gratuit'}
+                {p.price_monthly > 0 ? `${(p.price_monthly / 100).toFixed(0)} \u20AC` : 'Gratuit'}
                 <span className="text-sm text-gray-500 font-normal">/mois HT</span>
               </p>
-              <p className="text-xs text-gray-400">~ {Math.round((p.price_cents / 100) * 655.957).toLocaleString()} FCFA</p>
+              <p className="text-xs text-gray-400">~ {Math.round((p.price_monthly / 100) * 655.957).toLocaleString()} FCFA</p>
               <ul className="mt-3 space-y-1 text-sm text-gray-600">
                 <li>{p.max_projects === -1 ? 'Projets illimit\u00E9s' : `${p.max_projects} projets`}</li>
                 <li>{p.max_forms === -1 ? 'Formulaires illimit\u00E9s' : `${p.max_forms} formulaires`}</li>
@@ -266,7 +266,7 @@ export default function BillingPage() {
                 onClick={() => handlePlanPayment(p.id)}
                 className={`mt-4 w-full py-2 rounded-lg text-sm font-medium text-white ${p.id === plan?.id ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'}`}
               >
-                {p.id === plan?.id ? 'Renouveler' : p.price_cents > (plan?.price_cents || 0) ? 'Passer au plan' : 'Choisir ce plan'}
+                {p.id === plan?.id ? 'Renouveler' : p.price_monthly > (plan?.price_monthly || 0) ? 'Passer au plan' : 'Choisir ce plan'}
               </button>
             </div>
           ))}
@@ -305,7 +305,7 @@ export default function BillingPage() {
                     <td className="py-2 pr-4 font-mono text-xs">{inv.invoice_number}</td>
                     <td className="py-2 pr-4">{new Date(inv.created_at).toLocaleDateString('fr-FR')}</td>
                     <td className="py-2 pr-4 text-xs max-w-[200px] truncate">{inv.description || '-'}</td>
-                    <td className="py-2 pr-4">{(inv.amount_cents / 100).toFixed(2)} \u20AC</td>
+                    <td className="py-2 pr-4">{(inv.amount / 100).toFixed(2)} \u20AC</td>
                     <td className="py-2 pr-4">{inv.amount_xaf ? `${inv.amount_xaf.toLocaleString()} FCFA` : '-'}</td>
                     <td className="py-2 pr-4 text-xs">
                       {inv.payment_method === 'campay_om' ? '\u{1F7E0} Mobile Money' : inv.payment_method === 'campay_card' ? '\u{1F4B3} Carte' : '-'}
@@ -339,11 +339,11 @@ export default function BillingPage() {
               {modalMode === 'plan' && selectedPlan && (() => {
                 const p = plans.find(pl => pl.id === selectedPlan);
                 if (!p) return null;
-                const xaf = Math.round((p.price_cents / 100) * 655.957);
+                const xaf = Math.round((p.price_monthly / 100) * 655.957);
                 return (
                   <div className="bg-gray-50 rounded-lg p-3 mb-4">
                     <p className="font-medium">Plan {p.name}</p>
-                    <p className="text-blue-600 font-bold">{(p.price_cents / 100).toFixed(0)} \u20AC/mois = {xaf.toLocaleString()} FCFA</p>
+                    <p className="text-blue-600 font-bold">{(p.price_monthly / 100).toFixed(0)} \u20AC/mois = {xaf.toLocaleString()} FCFA</p>
                   </div>
                 );
               })()}

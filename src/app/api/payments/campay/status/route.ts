@@ -47,12 +47,12 @@ export async function GET(request: NextRequest) {
     }
 
     // If already completed, return cached status
-    if (invoice.status === 'paid' || invoice.status === 'failed') {
+    if (invoice.status === 'paid' || invoice.status === 'void') {
       return NextResponse.json({
         status: invoice.status === 'paid' ? 'SUCCESSFUL' : 'FAILED',
         invoice_status: invoice.status,
         invoice_number: invoice.invoice_number,
-        amount_eur: invoice.amount_cents / 100,
+        amount_eur: invoice.amount / 100,
       });
     }
 
@@ -93,7 +93,7 @@ export async function GET(request: NextRequest) {
           status: 'SUCCESSFUL',
           invoice_status: 'paid',
           invoice_number: invoice.invoice_number,
-          amount_eur: invoice.amount_cents / 100,
+          amount_eur: invoice.amount / 100,
           operator: txStatus.operator,
           message: 'Paiement effectu\u00E9 avec succ\u00E8s. Abonnement activ\u00E9.',
         });
@@ -101,7 +101,7 @@ export async function GET(request: NextRequest) {
       } else if (txStatus.status === 'FAILED') {
         await supabase
           .from('invoices')
-          .update({ status: 'failed' })
+          .update({ status: 'void' })
           .eq('id', invoice.id);
 
         return NextResponse.json({
