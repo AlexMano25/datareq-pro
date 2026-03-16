@@ -2,14 +2,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getTransactionStatus } from '@/lib/campay';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { db: { schema: 'datareq' } }
-);
+function getSupabase() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { db: { schema: 'datareq' } }
+  );
+}
 
 export async function GET(request: NextRequest) {
   try {
+    const supabase = getSupabase();
     const { searchParams } = new URL(request.url);
     const reference = searchParams.get('reference');
     const external_reference = searchParams.get('external_ref');
@@ -128,4 +131,3 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-

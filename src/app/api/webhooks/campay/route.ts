@@ -1,16 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { db: { schema: 'datareq' } }
-);
+function getSupabase() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { db: { schema: 'datareq' } }
+  );
+}
 
 // CamPay Webhook - called when payment status changes
 // Configure this URL in CamPay dashboard: https://rgpd.manovende.com/api/webhooks/campay
 export async function POST(request: NextRequest) {
   try {
+    const supabase = getSupabase();
     // Verify webhook secret if configured
     const webhookSecret = process.env.CAMPAY_WEBHOOK_SECRET;
     if (webhookSecret) {
@@ -134,4 +137,3 @@ export async function POST(request: NextRequest) {
 export async function GET() {
   return NextResponse.json({ status: 'ok', service: 'campay-webhook' });
 }
-
