@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { createClient } from '@/lib/supabase/client';
 
 const navItems = [
   { href: '/dashboard/analytics', label: 'Tableau de bord', icon: '📊' },
@@ -10,6 +11,7 @@ const navItems = [
   { href: '/dashboard/legal-rules', label: 'Base juridique', icon: '⚖️' },
   { href: '/dashboard/audit', label: 'Journal d\'audit', icon: '📝' },
   { href: '/dashboard/team', label: 'Équipe', icon: '👥' },
+  { href: '/dashboard/billing', label: 'Facturation', icon: '💳' },
   { href: '/dashboard/settings', label: 'Paramètres', icon: '⚙️' },
 ];
 
@@ -17,11 +19,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   async function handleLogout() {
-    await fetch('/api/auth/logout', { method: 'POST' });
-    router.push('/login');
-    router.refresh();
+    setLoggingOut(true);
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+      await fetch('/api/auth/logout', { method: 'POST' });
+      router.push('/login');
+      router.refresh();
+    } catch {
+      window.location.href = '/login';
+    }
   }
 
   return (
@@ -49,9 +59,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             className="w-full text-blue-300 hover:text-white text-sm text-left">
             {sidebarOpen ? '← Réduire' : '→'}
           </button>
-          <button onClick={handleLogout}
-            className="w-full text-red-300 hover:text-red-100 text-sm text-left">
-            {sidebarOpen ? 'Déconnexion' : '⏻'}
+          <button onClick={handleLogout} disabled={loggingOut}
+            className="w-full text-red-300 hover:text-red-100 text-sm text-left disabled:opacity-50">
+            {loggingOut ? (sidebarOpen ? 'Déconnexion...' : '...') : (sidebarOpen ? 'Déconnexion' : '⏻')}
           </button>
         </div>
       </aside>

@@ -2,10 +2,38 @@
 import { useSubscription } from '@/lib/hooks/useSubscription';
 import Link from 'next/link';
 
+function LoadingSkeleton() {
+  return (
+    <div className="p-6 max-w-7xl mx-auto animate-pulse">
+      <div className="flex gap-6">
+        <div className="flex-1 space-y-4">
+          <div className="h-8 bg-gray-200 rounded w-48" />
+          <div className="h-4 bg-gray-200 rounded w-72" />
+          <div className="grid grid-cols-3 gap-4 mt-6">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="bg-white rounded-xl shadow p-5">
+                <div className="h-4 bg-gray-200 rounded w-24 mb-3" />
+                <div className="h-8 bg-gray-200 rounded w-16 mb-2" />
+                <div className="h-3 bg-gray-200 rounded w-full" />
+              </div>
+            ))}
+          </div>
+          <div className="bg-white rounded-xl shadow p-6 mt-4">
+            <div className="h-5 bg-gray-200 rounded w-36 mb-4" />
+            <div className="space-y-3">
+              {[1, 2, 3, 4].map(i => <div key={i} className="h-10 bg-gray-100 rounded" />)}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function SubscriptionGate({ children }: { children: React.ReactNode }) {
   const { isLocked, lockReason, loading, subscription, daysRemaining } = useSubscription();
 
-  if (loading) return <div className="flex items-center justify-center min-h-[60vh] text-gray-400">Chargement...</div>;
+  if (loading) return <LoadingSkeleton />;
 
   if (isLocked) {
     return (
@@ -48,7 +76,7 @@ export default function SubscriptionGate({ children }: { children: React.ReactNo
             <strong>Essai gratuit :</strong> {days} jour{days > 1 ? 's' : ''} restant{days > 1 ? 's' : ''}.
           </span>
           <Link href="/dashboard/billing" className="text-yellow-700 font-medium hover:underline">
-            Passer au plan payant →
+            Passer au plan payant
           </Link>
         </div>
       )}
