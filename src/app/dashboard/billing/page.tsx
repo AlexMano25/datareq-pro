@@ -10,7 +10,7 @@ type ModalMode = 'plan' | 'deposit' | null;
 
 export default function BillingPage() {
   const { subscription, plan, limits, loading, daysRemaining, isLocked, lockReason, refresh } = useSubscription();
-  const { tenant, supabase } = useTenant();
+  const { tenant, supabase, loading: tenantLoading } = useTenant();
   const payment = usePayment();
   const [plans, setPlans] = useState<any[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
@@ -20,11 +20,12 @@ export default function BillingPage() {
   // Payment modal
   const [modalMode, setModalMode] = useState<ModalMode>(null);
   const [selectedPlan, setSelectedPlan] = useState<any>(null);
-  const [paymentMethod, setPaymentMethod] = useState<'orange_money' | 'card'>('orange_money');
+  const [paymentMethod, setPaymentMethod] = useState<'mobile_money' | 'card'>('mobile_money');
   const [phone, setPhone] = useState('');
   const [cardInfo, setCardInfo] = useState({ first_name: '', last_name: '', email: '' });
   const [depositAmountEur, setDepositAmountEur] = useState(50);
   const [customDeposit, setCustomDeposit] = useState('');
+  const [userEmail, setUserEmail] = useState('');
 
   const fetchInvoices = useCallback(async () => {
     if (!tenant) return;
@@ -35,7 +36,6 @@ export default function BillingPage() {
       .order('created_at', { ascending: false });
     if (data) {
       setInvoices(data);
-      // Calculate balance from paid deposits minus paid subscription invoices
       let bal = 0;
       for (const inv of data) {
         if (inv.status === 'paid') {
@@ -56,45 +56,55 @@ export default function BillingPage() {
       Promise.all([
         supabase.from('plans').select('*').eq('is_active', true).order('sort_order').then(({ data }) => { if (data) setPlans(data); }),
         fetchInvoices(),
+        supabase.auth.getUser().then(({ data }) => {
+          if (data?.user?.email) setUserEmail(data.user.email);
+        }),
       ]);
     }
   }, [tenant]);
 
-  // Open plan payment modal
   function handleSelectPlan(p: any) {
     setSelectedPlan(p);
     setModalMode('plan');
+    setCardInfo(prev => ({ ...prev, email: userEmail }));
   }
 
-  // Open deposit modal
   function handleDeposit() {
     setSelectedPlan(null);
     setDepositAmountEur(50);
     setCustomDeposit('');
     setModalMode('deposit');
+    setCardInfo(prev => ({ ...prev, email: userEmail }));
   }
 
   function getPayAmount(): number {
     if (modalMode === 'deposit') {
-      return customDeposit ? parseFloat(customDeposit) : depositAmountEur;
+      return customDeposit ? parseFloat(customDeposit) || 0 : depositAmountEur;
     }
     return selectedPlan ? selectedPlan.price_monthly / 100 : 0;
   }
 
   async function handlePay() {
-    if (!subscription || !tenant) return;
+    if (!tenant) return;
     const amountEur = getPayAmount();
     if (!amountEur || amountEur <= 0) return;
 
     const params: any = {
       tenant_id: tenant.tenant_id,
-      subscription_id: subscription.id,
-      plan_id: modalMode === 'plan' && selectedPlan ? selectedPlan.id : (plan?.id || subscription.plan_id),
       payment_method: paymentMethod,
       amount_eur: amountEur,
     };
 
-    if (paymentMethod === 'orange_money') {
+    if (subscription?.id) params.subscription_id = subscription.id;
+    if (modalMode === 'plan' && selectedPlan) {
+      params.plan_id = selectedPlan.id;
+      params.description = `Abonnement DataReq Pro - Plan ${selectedPlan.display_name || selectedPlan.name}`;
+    } else if (modalMode === 'deposit') {
+      params.description = `Recharge de compte DataReq Pro - Dépôt ${amountEur} €`;
+      if (plan?.id) params.plan_id = plan.id;
+    }
+
+    if (paymentMethod === 'mobile_money') {
       if (!phone) return;
       params.phone_number = phone;
     } else {
@@ -115,20 +125,16 @@ export default function BillingPage() {
         setModalMode(null);
         payment.reset();
         setShowUpgrade(false);
-      }, 2000);
+      }, 2500);
     }
   }, [payment.status]);
 
-  // Handle payment return from CamPay redirect
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const paymentResult = params.get('payment');
     if (paymentResult === 'success' || paymentResult === 'failed') {
       window.history.replaceState({}, '', '/dashboard/billing');
-      if (paymentResult === 'success') {
-        refresh();
-        fetchInvoices();
-      }
+      if (paymentResult === 'success') { refresh(); fetchInvoices(); }
     }
   }, []);
 
@@ -136,17 +142,13 @@ export default function BillingPage() {
     <div className={`bg-gray-200 rounded animate-pulse ${className}`} />
   );
 
-  if (loading) {
+  if (loading || tenantLoading) {
     return (
       <div>
         <Skeleton className="h-8 w-64 mb-6" />
         <div className="grid grid-cols-2 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow p-6"><Skeleton className="h-5 w-32 mb-3" /><Skeleton className="h-9 w-48" /></div>
           <div className="bg-white rounded-xl shadow p-6"><Skeleton className="h-5 w-32 mb-3" /><Skeleton className="h-9 w-32" /></div>
-        </div>
-        <div className="bg-white rounded-xl shadow p-6 mb-6">
-          <Skeleton className="h-5 w-40 mb-4" />
-          <div className="grid grid-cols-3 gap-4"><Skeleton className="h-20" /><Skeleton className="h-20" /><Skeleton className="h-20" /></div>
         </div>
         <div className="bg-white rounded-xl shadow p-6">
           <Skeleton className="h-5 w-48 mb-4" />
@@ -173,20 +175,19 @@ export default function BillingPage() {
     <div>
       <h1 className="text-2xl font-bold text-gray-900 mb-6">Facturation & Abonnement</h1>
 
-      {/* Lock warning */}
       {isLocked && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
           <p className="text-red-700 font-medium">{lockReason}</p>
         </div>
       )}
 
-      {/* Top cards: Plan + Balance */}
+      {/* Top cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        {/* Current Plan Card */}
+        {/* Plan Card */}
         <div className="bg-white rounded-xl shadow p-6">
           <h2 className="text-sm font-medium text-gray-500 mb-2">Plan actuel</h2>
           <div className="flex items-center gap-3">
-            <span className="text-2xl font-bold text-blue-600">{plan?.display_name || 'Aucun'}</span>
+            <span className="text-2xl font-bold text-blue-600">{plan?.display_name || 'Aucun plan'}</span>
             {currentStatus && (
               <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${currentStatus.color}`}>
                 {currentStatus.label}
@@ -200,7 +201,7 @@ export default function BillingPage() {
             </p>
           )}
           {subscription?.status === 'trialing' && (
-            <p className="text-xs text-yellow-600 mt-2">
+            <p className="text-xs text-yellow-600 mt-2 font-medium">
               Essai : {daysRemaining()} jour{daysRemaining() > 1 ? 's' : ''} restant{daysRemaining() > 1 ? 's' : ''}
             </p>
           )}
@@ -209,7 +210,7 @@ export default function BillingPage() {
               Renouvellement : {new Date(subscription.current_period_end).toLocaleDateString('fr-FR')}
             </p>
           )}
-          <div className="flex gap-2 mt-4">
+          <div className="flex gap-2 mt-4 flex-wrap">
             {plan && plan.price_monthly > 0 && (
               <button onClick={() => handleSelectPlan(plan)}
                 className="bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 text-sm font-medium">
@@ -218,12 +219,12 @@ export default function BillingPage() {
             )}
             <button onClick={() => setShowUpgrade(!showUpgrade)}
               className="border border-blue-300 text-blue-700 px-3 py-1.5 rounded-lg hover:bg-blue-50 text-sm font-medium">
-              Changer de plan
+              {showUpgrade ? 'Masquer' : 'Changer de plan'}
             </button>
           </div>
         </div>
 
-        {/* Balance / Deposit Card */}
+        {/* Balance Card */}
         <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl shadow p-6 border border-green-100">
           <h2 className="text-sm font-medium text-green-700 mb-2">Solde du compte</h2>
           <div className="flex items-baseline gap-2">
@@ -231,7 +232,7 @@ export default function BillingPage() {
             <span className="text-sm text-green-500">({Math.round(balance * EUR_XAF).toLocaleString('fr-FR')} XAF)</span>
           </div>
           <p className="text-xs text-green-600/70 mt-1">
-            Rechargez votre compte pour payer vos prochains mois automatiquement
+            Rechargez pour payer automatiquement vos prochains mois
           </p>
           <button onClick={handleDeposit}
             className="mt-4 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 text-sm font-medium w-full">
@@ -240,7 +241,7 @@ export default function BillingPage() {
         </div>
       </div>
 
-      {/* Usage limits */}
+      {/* Usage */}
       {limits && (
         <div className="bg-white rounded-xl shadow p-6 mb-6">
           <h2 className="text-sm font-medium text-gray-500 mb-4">Utilisation</h2>
@@ -252,7 +253,7 @@ export default function BillingPage() {
         </div>
       )}
 
-      {/* Plan selection */}
+      {/* Plan upgrade */}
       {showUpgrade && (
         <div className="mb-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Changer de plan</h2>
@@ -269,9 +270,8 @@ export default function BillingPage() {
                 )}
                 <ul className="mt-3 space-y-1.5 text-sm text-gray-600">
                   <li>{p.max_projects === -1 ? 'Projets illimités' : `${p.max_projects} projets`}</li>
-                  <li>{p.max_forms_per_project === -1 ? 'Formulaires illimités' : `${p.max_forms_per_project} form./projet`}</li>
-                  <li>{p.max_responses_per_month === -1 ? 'Réponses illimitées' : `${p.max_responses_per_month} rép./mois`}</li>
                   <li>{p.max_users === -1 ? 'Utilisateurs illimités' : `${p.max_users} utilisateur${p.max_users > 1 ? 's' : ''}`}</li>
+                  <li>{p.max_responses_per_month === -1 ? 'Réponses illimitées' : `${p.max_responses_per_month} rép./mois`}</li>
                 </ul>
                 {plan?.id === p.id ? (
                   <div className="mt-4 text-center text-sm text-blue-600 font-medium py-2 bg-blue-50 rounded-lg">Plan actuel</div>
@@ -287,10 +287,7 @@ export default function BillingPage() {
               <h3 className="font-semibold text-lg text-gray-900">Enterprise</h3>
               <p className="text-2xl font-bold text-gray-900 mt-2">Sur devis</p>
               <ul className="mt-3 space-y-1.5 text-sm text-gray-600">
-                <li>Tout du plan Pro</li>
-                <li>SSO / SAML 2.0</li>
-                <li>Support dédié & SLA</li>
-                <li>Déploiement on-premise</li>
+                <li>Tout du plan Pro</li><li>SSO / SAML 2.0</li><li>Support dédié</li>
               </ul>
               <a href="mailto:contact@manovende.com" className="mt-4 block w-full text-center border border-blue-600 text-blue-600 py-2 rounded-lg hover:bg-blue-50 text-sm font-medium">
                 Contactez-nous
@@ -302,9 +299,8 @@ export default function BillingPage() {
 
       {/* ========== PAYMENT MODAL ========== */}
       {modalMode && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
-            {/* Header */}
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => { if (payment.status === 'idle') { setModalMode(null); payment.reset(); } }}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-start mb-5">
               <div>
                 <h3 className="text-lg font-bold text-gray-900">
@@ -312,8 +308,7 @@ export default function BillingPage() {
                 </h3>
                 {modalMode === 'plan' && selectedPlan && (
                   <p className="text-sm text-gray-500">
-                    {(selectedPlan.price_monthly / 100).toFixed(0)} € / mois
-                    ({Math.round((selectedPlan.price_monthly / 100) * EUR_XAF).toLocaleString('fr-FR')} XAF)
+                    {(selectedPlan.price_monthly / 100).toFixed(0)} € ({Math.round((selectedPlan.price_monthly / 100) * EUR_XAF).toLocaleString('fr-FR')} XAF)
                   </p>
                 )}
               </div>
@@ -323,7 +318,7 @@ export default function BillingPage() {
 
             {payment.status === 'idle' && (
               <>
-                {/* Deposit amount selection */}
+                {/* Deposit amount */}
                 {modalMode === 'deposit' && (
                   <div className="mb-5">
                     <label className="block text-sm font-medium text-gray-700 mb-2">Montant du dépôt</label>
@@ -340,60 +335,61 @@ export default function BillingPage() {
                         </button>
                       ))}
                     </div>
-                    <div className="relative">
-                      <input type="number" value={customDeposit}
-                        onChange={e => { setCustomDeposit(e.target.value); }}
-                        placeholder="Montant personnalisé (EUR)"
-                        min="5" step="1"
-                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 text-sm" />
-                      {payAmount > 0 && (
-                        <p className="text-xs text-gray-400 mt-1 text-right">
-                          = {payAmountXaf.toLocaleString('fr-FR')} XAF
-                        </p>
-                      )}
-                    </div>
+                    <input type="number" value={customDeposit}
+                      onChange={e => setCustomDeposit(e.target.value)}
+                      placeholder="Montant personnalisé (EUR)" min="5" step="1"
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 text-sm" />
+                    {payAmount > 0 && (
+                      <p className="text-xs text-gray-400 mt-1 text-right">= {payAmountXaf.toLocaleString('fr-FR')} XAF</p>
+                    )}
                   </div>
                 )}
 
-                {/* Payment method */}
+                {/* Payment methods */}
                 <div className="space-y-2 mb-4">
                   <label className="block text-sm font-medium text-gray-700 mb-2">Mode de paiement</label>
+
                   <label className={`flex items-center gap-3 p-3 border-2 rounded-xl cursor-pointer transition-all ${
-                    paymentMethod === 'orange_money' ? 'border-orange-400 bg-orange-50' : 'border-gray-200'
+                    paymentMethod === 'mobile_money' ? 'border-orange-400 bg-orange-50' : 'border-gray-200'
                   }`}>
-                    <input type="radio" name="pm" value="orange_money" checked={paymentMethod === 'orange_money'}
-                      onChange={() => setPaymentMethod('orange_money')} className="hidden" />
+                    <input type="radio" name="pm" value="mobile_money" checked={paymentMethod === 'mobile_money'}
+                      onChange={() => setPaymentMethod('mobile_money')} className="hidden" />
                     <span className="text-2xl">📱</span>
-                    <div>
-                      <p className="font-medium text-gray-900">Orange Money</p>
-                      <p className="text-xs text-gray-500">Paiement mobile money</p>
+                    <div className="flex-1">
+                      <p className="font-medium text-gray-900">Mobile Money</p>
+                      <p className="text-xs text-gray-500">Orange Money ou MTN MoMo</p>
+                    </div>
+                    <div className="flex gap-1">
+                      <span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 text-xs rounded font-medium">Orange</span>
+                      <span className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 text-xs rounded font-medium">MTN</span>
                     </div>
                   </label>
+
                   <label className={`flex items-center gap-3 p-3 border-2 rounded-xl cursor-pointer transition-all ${
                     paymentMethod === 'card' ? 'border-blue-400 bg-blue-50' : 'border-gray-200'
                   }`}>
                     <input type="radio" name="pm" value="card" checked={paymentMethod === 'card'}
                       onChange={() => setPaymentMethod('card')} className="hidden" />
                     <span className="text-2xl">💳</span>
-                    <div>
+                    <div className="flex-1">
                       <p className="font-medium text-gray-900">Carte bancaire</p>
                       <p className="text-xs text-gray-500">Visa / Mastercard via CamPay</p>
                     </div>
                   </label>
                 </div>
 
-                {/* Phone for Orange Money */}
-                {paymentMethod === 'orange_money' && (
+                {paymentMethod === 'mobile_money' && (
                   <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Numéro Orange Money</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Numéro de téléphone</label>
                     <input type="tel" value={phone} onChange={e => setPhone(e.target.value)}
-                      placeholder="6XXXXXXXX" maxLength={12}
+                      placeholder="Ex: 690123456 ou 670123456" maxLength={12}
                       className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500" />
-                    <p className="text-xs text-gray-400 mt-1">Un push USSD sera envoyé sur ce numéro</p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Orange (69x, 65x) ou MTN (67x, 68x) — push USSD automatique
+                    </p>
                   </div>
                 )}
 
-                {/* Card info */}
                 {paymentMethod === 'card' && (
                   <div className="space-y-3 mb-4">
                     <div className="grid grid-cols-2 gap-3">
@@ -419,32 +415,34 @@ export default function BillingPage() {
                   </div>
                 )}
 
-                {/* Pay button */}
                 <button onClick={handlePay}
-                  disabled={payAmount <= 0 || (paymentMethod === 'orange_money' ? !phone : (!cardInfo.first_name || !cardInfo.last_name || !cardInfo.email))}
+                  disabled={payAmount <= 0 || (paymentMethod === 'mobile_money' ? !phone : (!cardInfo.first_name || !cardInfo.last_name || !cardInfo.email))}
                   className={`w-full text-white py-3 rounded-xl font-medium disabled:opacity-50 disabled:cursor-not-allowed ${
                     modalMode === 'deposit' ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'
                   }`}>
-                  {modalMode === 'deposit' ? 'Recharger' : 'Payer'} {payAmount.toFixed(0)} € ({payAmountXaf.toLocaleString('fr-FR')} XAF)
+                  {modalMode === 'deposit' ? 'Recharger' : 'Payer'} {payAmount > 0 ? `${payAmount.toFixed(0)} € (${payAmountXaf.toLocaleString('fr-FR')} XAF)` : ''}
                 </button>
               </>
             )}
 
-            {/* Processing */}
             {payment.status === 'processing' && (
               <div className="text-center py-8">
                 <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4" />
-                <p className="text-gray-600 font-medium">Traitement en cours...</p>
+                <p className="text-gray-600 font-medium">Connexion à CamPay...</p>
               </div>
             )}
 
-            {/* Pending */}
             {payment.status === 'pending' && (
               <div className="text-center py-6">
                 <div className="w-12 h-12 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mx-auto mb-4" />
                 <p className="text-gray-900 font-medium mb-2">En attente de confirmation</p>
-                {paymentMethod === 'orange_money' ? (
-                  <p className="text-sm text-gray-500">Confirmez le paiement sur votre téléphone.</p>
+                {paymentMethod === 'mobile_money' ? (
+                  <div>
+                    <p className="text-sm text-gray-500">Confirmez le paiement sur votre téléphone avec votre code PIN.</p>
+                    {payment.operator && (
+                      <p className="text-xs text-gray-400 mt-1">Opérateur : {payment.operator}</p>
+                    )}
+                  </div>
                 ) : (
                   <p className="text-sm text-gray-500">Complétez le paiement dans l&apos;onglet ouvert.</p>
                 )}
@@ -454,7 +452,6 @@ export default function BillingPage() {
               </div>
             )}
 
-            {/* Success */}
             {payment.status === 'success' && (
               <div className="text-center py-6">
                 <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -465,13 +462,9 @@ export default function BillingPage() {
                 <p className="text-green-700 font-bold text-lg">
                   {modalMode === 'deposit' ? 'Recharge effectuée !' : 'Paiement réussi !'}
                 </p>
-                <p className="text-sm text-gray-500 mt-1">
-                  {modalMode === 'deposit' ? 'Votre solde a été crédité.' : 'Votre abonnement a été activé.'}
-                </p>
               </div>
             )}
 
-            {/* Failed */}
             {payment.status === 'failed' && (
               <div className="text-center py-6">
                 <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -480,7 +473,7 @@ export default function BillingPage() {
                   </svg>
                 </div>
                 <p className="text-red-700 font-bold">Paiement échoué</p>
-                <p className="text-sm text-gray-500 mt-1">{payment.error}</p>
+                <p className="text-sm text-gray-500 mt-2">{payment.error}</p>
                 <button onClick={() => payment.reset()}
                   className="mt-4 bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">
                   Réessayer
@@ -501,7 +494,7 @@ export default function BillingPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-gray-500">
-                  <th className="pb-2">N° Facture</th>
+                  <th className="pb-2">N°</th>
                   <th className="pb-2">Date</th>
                   <th className="pb-2">Description</th>
                   <th className="pb-2">Montant</th>
@@ -513,18 +506,16 @@ export default function BillingPage() {
                 {invoices.map((inv: any) => (
                   <tr key={inv.id} className="border-b last:border-0">
                     <td className="py-3 font-mono text-gray-900 text-xs">{inv.invoice_number}</td>
-                    <td className="py-3 text-gray-500">{new Date(inv.created_at).toLocaleDateString('fr-FR')}</td>
-                    <td className="py-3 text-gray-700 text-xs max-w-[200px] truncate">{inv.description || '—'}</td>
+                    <td className="py-3 text-gray-500 text-xs">{new Date(inv.created_at).toLocaleDateString('fr-FR')}</td>
+                    <td className="py-3 text-gray-700 text-xs max-w-[180px] truncate">{inv.description || '—'}</td>
                     <td className="py-3">
                       <span className="font-medium">{((inv.amount_cents || inv.amount || 0) / 100).toFixed(2)} €</span>
-                      {inv.amount_xaf && (
-                        <span className="text-gray-400 text-xs block">({Number(inv.amount_xaf).toLocaleString('fr-FR')} XAF)</span>
-                      )}
+                      {inv.amount_xaf && <span className="text-gray-400 text-xs block">{Number(inv.amount_xaf).toLocaleString('fr-FR')} XAF</span>}
                     </td>
-                    <td className="py-3 text-gray-500 text-xs">
-                      {inv.payment_method === 'campay_om' ? '📱 OM' :
+                    <td className="py-3 text-xs">
+                      {inv.payment_method === 'campay_mobile' ? '📱 Mobile' :
+                       inv.payment_method === 'campay_om' ? '📱 Orange' :
                        inv.payment_method === 'campay_card' ? '💳 Carte' :
-                       inv.payment_method === 'ynote_mtn' ? '📱 MTN' :
                        inv.payment_method || '—'}
                     </td>
                     <td className="py-3">
