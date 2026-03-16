@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef } from 'react';
 
-type PaymentMethod = 'mobile_money' | 'card';
+type PaymentMethod = 'mobile_money' | 'orange_money' | 'card';
 type PaymentStatus = 'idle' | 'processing' | 'pending' | 'success' | 'failed';
 
 interface PaymentState {
@@ -10,7 +10,6 @@ interface PaymentState {
   reference: string | null;
   paymentLink: string | null;
   ussdCode: string | null;
-  operator: string | null;
   invoiceNumber: string | null;
   amountXaf: number | null;
   amountEur: number | null;
@@ -19,15 +18,15 @@ interface PaymentState {
 
 interface InitPaymentParams {
   tenant_id: string;
-  subscription_id?: string;
-  plan_id?: string;
+  subscription_id?: string;  // optional for deposits
+  plan_id?: string;          // optional for deposits
   payment_method: PaymentMethod;
   phone_number?: string;
   first_name?: string;
   last_name?: string;
   email?: string;
-  amount_eur: number;
-  description?: string;
+  amount_eur: number;        // required
+  description?: string;      // optional description
 }
 
 export function usePayment() {
@@ -36,7 +35,6 @@ export function usePayment() {
     reference: null,
     paymentLink: null,
     ussdCode: null,
-    operator: null,
     invoiceNumber: null,
     amountXaf: null,
     amountEur: null,
@@ -71,11 +69,11 @@ export function usePayment() {
         setState(prev => ({
           ...prev,
           status: 'failed',
-          error: data.message || 'Le paiement a échoué',
+          error: data.message || 'Le paiement a \u00E9chou\u00E9',
         }));
         return true;
       }
-      return false;
+      return false; // still pending
     } catch {
       return false;
     }
@@ -84,7 +82,7 @@ export function usePayment() {
   const startPolling = useCallback((reference: string) => {
     stopPolling();
     let attempts = 0;
-    const maxAttempts = 40;
+    const maxAttempts = 40; // 40 x 5s = ~3 minutes
 
     pollingRef.current = setInterval(async () => {
       attempts++;
@@ -95,7 +93,7 @@ export function usePayment() {
           setState(prev => ({
             ...prev,
             status: 'failed',
-            error: 'Délai d\u2019attente dépassé. Vérifiez le statut dans votre historique.',
+            error: 'D\u00E9lai d\u2019attente d\u00E9pass\u00E9. V\u00E9rifiez le statut dans votre historique.',
           }));
         }
       }
@@ -108,7 +106,6 @@ export function usePayment() {
       reference: null,
       paymentLink: null,
       ussdCode: null,
-      operator: null,
       invoiceNumber: null,
       amountXaf: null,
       amountEur: null,
@@ -134,6 +131,7 @@ export function usePayment() {
       }
 
       if (data.type === 'payment_link' && data.link) {
+        // Card payment - redirect to CamPay payment page
         setState(prev => ({
           ...prev,
           status: 'pending',
@@ -143,25 +141,39 @@ export function usePayment() {
           amountXaf: data.amount_xaf,
           amountEur: data.amount_eur,
         }));
+        // Open payment link in new tab
         window.open(data.link, '_blank');
-        if (data.reference) startPolling(data.reference);
+        // Start polling for status
+        if (data.reference) {
+          startPolling(data.reference);
+        }
 
       } else if (data.type === 'ussd_push') {
+        // Mobile Money - USSD push sent to phone (Orange or MTN)
         setState(prev => ({
           ...prev,
           status: 'pending',
           reference: data.reference,
           ussdCode: data.ussd_code,
-          operator: data.operator,
           invoiceNumber: data.invoice_number,
           amountXaf: data.amount_xaf,
           amountEur: data.amount_eur,
         }));
-        if (data.reference) startPolling(data.reference);
+        // Start polling for confirmation
+        if (data.reference) {
+          startPolling(data.reference);
+        }
+      } else {
+        // Unknown response type - show error instead of hanging
+        setState(prev => ({
+          ...prev,
+          status: 'failed',
+          error: data.error || 'Réponse inattendue du serveur de paiement',
+        }));
       }
 
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Erreur réseau';
+      const message = err instanceof Error ? err.message : 'Erreur r\u00E9seau';
       setState(prev => ({
         ...prev,
         status: 'failed',
@@ -177,7 +189,6 @@ export function usePayment() {
       reference: null,
       paymentLink: null,
       ussdCode: null,
-      operator: null,
       invoiceNumber: null,
       amountXaf: null,
       amountEur: null,
@@ -193,3 +204,4 @@ export function usePayment() {
     stopPolling,
   };
 }
+

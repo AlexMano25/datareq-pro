@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { initCollect, getPaymentLink, eurToXaf } from '@/lib/campay';
 
+// Lazy initialization to avoid build-time crash when env vars aren't available
 function getSupabase() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -18,13 +19,13 @@ export async function POST(request: NextRequest) {
       tenant_id,
       subscription_id,  // optional for deposits
       plan_id,           // optional for deposits
-      payment_method,    // 'mobile_money', 'card'
-      phone_number,      // required for mobile_money
+      payment_method,    // 'mobile_money', 'orange_money', 'card'
+      phone_number,      // required for mobile money
       first_name,
       last_name,
       email,
-      amount_eur,        // direct amount in EUR
-      description,       // optional custom description
+      amount_eur,        // amount in EUR
+      description,       // optional description (e.g. "Recharge")
     } = body;
 
     if (!tenant_id || !payment_method) {
@@ -34,21 +35,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Determine amount
+    // Determine amount: from plan or directly from amount_eur
     let amountEur = amount_eur;
-    let planName = 'Dépôt';
-    let invoiceDescription = description || 'Recharge de compte DataReq Pro';
+    let planName = 'Recharge';
+    let plan = null;
 
     if (plan_id) {
-      const { data: plan } = await supabase
+      const { data: planData } = await supabase
         .from('plans')
         .select('*')
         .eq('id', plan_id)
         .single();
+      plan = planData;
       if (plan) {
-        amountEur = amountEur || (plan.price_monthly / 100);
-        planName = plan.display_name || plan.name;
-        invoiceDescription = description || `Abonnement DataReq Pro - Plan ${planName}`;
+        planName = plan.name;
+        if (!amountEur) amountEur = plan.price_cents / 100;
       }
     }
 
@@ -56,29 +57,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Montant invalide' }, { status: 400 });
     }
 
-    const amountXaf = eurToXaf(amountEur);
     const amountCents = Math.round(amountEur * 100);
-    const externalRef = `DR-${tenant_id}-${Date.now()}`;
+    const amountXaf = eurToXaf(amountEur);
+    const externalRef = `DR-${tenant_id}-${subscription_id || 'deposit'}-${Date.now()}`;
 
-    // Determine payment_method label for invoice
-    let pmLabel = 'campay';
-    if (payment_method === 'mobile_money') {
-      // CamPay auto-detects Orange vs MTN from phone number
-      pmLabel = 'campay_mobile';
-    } else if (payment_method === 'card') {
-      pmLabel = 'campay_card';
-    }
+    // Normalize payment method for storage
+    const isMobileMoney = payment_method === 'mobile_money' || payment_method === 'orange_money';
+    const storedPaymentMethod = isMobileMoney ? 'campay_om' : 'campay_card';
+    const invoiceDescription = description || (plan ? `Abonnement DataReq Pro - Plan ${planName}` : `Recharge compte DataReq Pro`);
 
-    // Create pending invoice
-    const invoiceData: any = {
+    // Create pending invoice in database
+    const invoiceData: Record<string, unknown> = {
       tenant_id,
       amount_cents: amountCents,
       currency: 'EUR',
       status: 'pending',
       description: invoiceDescription,
-      payment_method: pmLabel,
+      payment_method: storedPaymentMethod,
       external_reference: externalRef,
-      amount_xaf: amountXaf,
     };
     if (subscription_id) invoiceData.subscription_id = subscription_id;
 
@@ -90,20 +86,21 @@ export async function POST(request: NextRequest) {
 
     if (invoiceError) {
       console.error('Invoice creation error:', invoiceError);
-      return NextResponse.json({ error: 'Erreur création facture: ' + invoiceError.message }, { status: 500 });
+      return NextResponse.json({ error: 'Failed to create invoice' }, { status: 500 });
     }
 
     let result;
 
-    if (payment_method === 'mobile_money') {
-      // Mobile Money (Orange or MTN) via USSD push - CamPay auto-detects operator
+    if (isMobileMoney) {
+      // Mobile Money collection via USSD push (Orange or MTN - CamPay auto-detects)
       if (!phone_number) {
         return NextResponse.json(
-          { error: 'Numéro de téléphone requis pour le paiement mobile money' },
+          { error: 'Numéro de téléphone requis pour le paiement Mobile Money' },
           { status: 400 }
         );
       }
 
+      // Ensure phone starts with 237
       const formattedPhone = phone_number.startsWith('237')
         ? phone_number
         : `237${phone_number}`;
@@ -112,16 +109,17 @@ export async function POST(request: NextRequest) {
         amount: String(amountXaf),
         currency: 'XAF',
         from: formattedPhone,
-        description: `DataReq Pro - ${planName} (${invoice.invoice_number || externalRef})`,
+        description: `DataReq Pro - ${planName} (Facture ${invoice.invoice_number})`,
         external_reference: externalRef,
       });
 
+      // Update invoice with CamPay reference
       if (result.reference) {
         await supabase
           .from('invoices')
           .update({
             campay_reference: result.reference,
-            campay_operator: result.operator,
+            amount_xaf: amountXaf,
           })
           .eq('id', invoice.id);
       }
@@ -136,13 +134,14 @@ export async function POST(request: NextRequest) {
         amount_eur: amountEur,
         invoice_id: invoice.id,
         invoice_number: invoice.invoice_number,
-        message: result.message || 'Veuillez confirmer le paiement sur votre téléphone',
+        message: 'Veuillez confirmer le paiement sur votre t\u00E9l\u00E9phone',
       });
 
     } else if (payment_method === 'card') {
+      // Card payment via payment link
       if (!first_name || !last_name || !email) {
         return NextResponse.json(
-          { error: 'Prénom, nom et email requis pour le paiement par carte' },
+          { error: 'first_name, last_name and email required for card payment' },
           { status: 400 }
         );
       }
@@ -152,7 +151,7 @@ export async function POST(request: NextRequest) {
       result = await getPaymentLink({
         amount: String(amountXaf),
         currency: 'XAF',
-        description: `DataReq Pro - ${planName} (${invoice.invoice_number || externalRef})`,
+        description: `DataReq Pro - ${planName} (Facture ${invoice.invoice_number})`,
         external_reference: externalRef,
         from: phone_number ? (phone_number.startsWith('237') ? phone_number : `237${phone_number}`) : '',
         first_name,
@@ -163,11 +162,12 @@ export async function POST(request: NextRequest) {
         payment_options: 'CARD',
       });
 
-      if (result.reference) {
+      if (result.status === 'SUCCESSFUL' && result.reference) {
         await supabase
           .from('invoices')
           .update({
             campay_reference: result.reference,
+            amount_xaf: amountXaf,
             payment_link: result.link,
           })
           .eq('id', invoice.id);
@@ -187,14 +187,15 @@ export async function POST(request: NextRequest) {
 
     } else {
       return NextResponse.json(
-        { error: 'Mode de paiement invalide. Utilisez: mobile_money, card' },
+        { error: 'Méthode de paiement invalide. Utilisez : mobile_money, orange_money, card' },
         { status: 400 }
       );
     }
 
   } catch (error: unknown) {
     console.error('Payment error:', error);
-    const message = error instanceof Error ? error.message : 'Erreur de paiement';
+    const message = error instanceof Error ? error.message : 'Payment processing failed';
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+

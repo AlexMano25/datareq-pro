@@ -73,19 +73,21 @@ export async function GET(request: NextRequest) {
           })
           .eq('id', invoice.id);
 
-        // Activate/renew subscription
-        const now = new Date();
-        const nextPeriod = new Date(now);
-        nextPeriod.setMonth(nextPeriod.getMonth() + 1);
+        // Activate/renew subscription (only if linked to a subscription)
+        if (invoice.subscription_id) {
+          const now = new Date();
+          const nextPeriod = new Date(now);
+          nextPeriod.setMonth(nextPeriod.getMonth() + 1);
 
-        await supabase
-          .from('subscriptions')
-          .update({
-            status: 'active',
-            current_period_start: now.toISOString(),
-            current_period_end: nextPeriod.toISOString(),
-          })
-          .eq('id', invoice.subscription_id);
+          await supabase
+            .from('subscriptions')
+            .update({
+              status: 'active',
+              current_period_start: now.toISOString(),
+              current_period_end: nextPeriod.toISOString(),
+            })
+            .eq('id', invoice.subscription_id);
+        }
 
         return NextResponse.json({
           status: 'SUCCESSFUL',
@@ -131,3 +133,4 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+

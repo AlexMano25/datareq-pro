@@ -86,19 +86,21 @@ export async function POST(request: NextRequest) {
         })
         .eq('id', invoice.id);
 
-      // Activate/renew subscription
-      const now = new Date();
-      const nextPeriod = new Date(now);
-      nextPeriod.setMonth(nextPeriod.getMonth() + 1);
+      // Activate/renew subscription (only if linked)
+      if (invoice.subscription_id) {
+        const now = new Date();
+        const nextPeriod = new Date(now);
+        nextPeriod.setMonth(nextPeriod.getMonth() + 1);
 
-      await supabase
-        .from('subscriptions')
-        .update({
-          status: 'active',
-          current_period_start: now.toISOString(),
-          current_period_end: nextPeriod.toISOString(),
-        })
-        .eq('id', invoice.subscription_id);
+        await supabase
+          .from('subscriptions')
+          .update({
+            status: 'active',
+            current_period_start: now.toISOString(),
+            current_period_end: nextPeriod.toISOString(),
+          })
+          .eq('id', invoice.subscription_id);
+      }
 
       console.log(`CamPay webhook: payment successful for invoice ${invoice.invoice_number}`);
 
@@ -137,3 +139,4 @@ export async function POST(request: NextRequest) {
 export async function GET() {
   return NextResponse.json({ status: 'ok', service: 'campay-webhook' });
 }
+
