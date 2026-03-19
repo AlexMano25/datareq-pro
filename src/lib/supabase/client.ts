@@ -8,16 +8,19 @@ export function createClient() {
       db: { schema: 'datareq' },
       global: {
         fetch: (url: RequestInfo | URL, init?: RequestInit) => {
-          const headers = new Headers(init?.headers);
-          // Force Accept-Profile and Content-Profile headers for datareq schema
-          // createBrowserClient from @supabase/ssr v0.9.0 does not forward db.schema
-          if (!headers.has('Accept-Profile')) {
-            headers.set('Accept-Profile', 'datareq');
+          const urlStr = typeof url === 'string' ? url : url.toString();
+          // Only add schema headers for PostgREST requests, not auth/storage/realtime
+          if (urlStr.includes('/rest/v1/')) {
+            const headers = new Headers(init?.headers);
+            if (!headers.has('Accept-Profile')) {
+              headers.set('Accept-Profile', 'datareq');
+            }
+            if (!headers.has('Content-Profile')) {
+              headers.set('Content-Profile', 'datareq');
+            }
+            return fetch(url, { ...init, headers });
           }
-          if (!headers.has('Content-Profile')) {
-            headers.set('Content-Profile', 'datareq');
-          }
-          return fetch(url, { ...init, headers });
+          return fetch(url, init);
         },
       },
     }
