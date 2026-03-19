@@ -95,27 +95,27 @@ export async function GET(request: NextRequest) {
           invoice_number: invoice.invoice_number,
           amount_eur: invoice.amount / 100,
           operator: txStatus.operator,
-          message: 'Paiement effectu\u00E9 avec succ\u00E8s. Abonnement activ\u00E9.',
+          message: 'Paiement effectué avec succès. Abonnement activé.',
         });
 
       } else if (txStatus.status === 'FAILED') {
         await supabase
           .from('invoices')
-          .update({ status: 'void' })
+          .update({ status: 'void' })  // DB CHECK: void (not 'failed')
           .eq('id', invoice.id);
 
         return NextResponse.json({
           status: 'FAILED',
-          invoice_status: 'failed',
+          invoice_status: 'void',
           invoice_number: invoice.invoice_number,
-          message: 'Le paiement a \u00E9chou\u00E9. Veuillez r\u00E9essayer.',
+          message: 'Le paiement a échoué. Veuillez réessayer.',
         });
       }
 
       // Still pending
       return NextResponse.json({
         status: 'PENDING',
-        invoice_status: 'pending',
+        invoice_status: 'open',
         invoice_number: invoice.invoice_number,
         message: 'Paiement en attente de confirmation...',
       });
@@ -133,4 +133,3 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-

@@ -59,7 +59,9 @@ export async function POST(request: NextRequest) {
 
     const amountCents = Math.round(amountEur * 100);
     const amountXaf = eurToXaf(amountEur);
-    const externalRef = `DR-${tenant_id.substring(0, 8)}-${Date.now()}`;
+    const externalRef = `DR-${tenant_id}-${subscription_id || 'deposit'}-${Date.now()}`;
+
+    // Generate invoice number
     const invoiceNumber = `INV-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
 
     // Normalize payment method for storage
@@ -67,14 +69,13 @@ export async function POST(request: NextRequest) {
     const storedPaymentMethod = isMobileMoney ? 'campay_om' : 'campay_card';
     const invoiceDescription = description || (plan ? `Abonnement DataReq Pro - Plan ${planName}` : `Recharge compte DataReq Pro`);
 
-    // Create invoice in database
-    // DB schema: amount (int), status CHECK (draft/open/paid/void/uncollectible), invoice_number (text NOT NULL)
+    // Create invoice in database - use correct column names matching DB schema
     const invoiceData: Record<string, unknown> = {
       tenant_id,
-      invoice_number: invoiceNumber,
-      amount: amountCents,
+      invoice_number: invoiceNumber,  // NOT NULL in DB
+      amount: amountCents,            // DB column is 'amount', not 'amount_cents'
       currency: 'eur',
-      status: 'open',
+      status: 'open',                 // DB CHECK: draft/open/paid/void/uncollectible (NOT 'pending')
       description: invoiceDescription,
       payment_method: storedPaymentMethod,
       external_reference: externalRef,
@@ -88,8 +89,11 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (invoiceError) {
-      console.error('Invoice creation error:', invoiceError);
-      return NextResponse.json({ error: 'Failed to create invoice' }, { status: 500 });
+      console.error('Invoice creation error:', JSON.stringify(invoiceError));
+      return NextResponse.json(
+        { error: `Erreur création facture: ${invoiceError.message}` },
+        { status: 500 }
+      );
     }
 
     let result;
@@ -112,7 +116,7 @@ export async function POST(request: NextRequest) {
         amount: String(amountXaf),
         currency: 'XAF',
         from: formattedPhone,
-        description: `DataReq Pro - ${planName} (Facture ${invoice.invoice_number})`,
+        description: `DataReq Pro - ${planName} (Facture ${invoiceNumber})`,
         external_reference: externalRef,
       });
 
@@ -136,8 +140,8 @@ export async function POST(request: NextRequest) {
         amount_xaf: amountXaf,
         amount_eur: amountEur,
         invoice_id: invoice.id,
-        invoice_number: invoice.invoice_number,
-        message: 'Veuillez confirmer le paiement sur votre t\u00E9l\u00E9phone',
+        invoice_number: invoiceNumber,
+        message: 'Veuillez confirmer le paiement sur votre téléphone',
       });
 
     } else if (payment_method === 'card') {
@@ -154,7 +158,7 @@ export async function POST(request: NextRequest) {
       result = await getPaymentLink({
         amount: String(amountXaf),
         currency: 'XAF',
-        description: `DataReq Pro - ${planName} (Facture ${invoice.invoice_number})`,
+        description: `DataReq Pro - ${planName} (Facture ${invoiceNumber})`,
         external_reference: externalRef,
         from: phone_number ? (phone_number.startsWith('237') ? phone_number : `237${phone_number}`) : '',
         first_name,
@@ -165,7 +169,7 @@ export async function POST(request: NextRequest) {
         payment_options: 'CARD',
       });
 
-      if (result.status === 'SUCCESSFUL' && result.reference) {
+      if (result.reference) {
         await supabase
           .from('invoices')
           .update({
@@ -184,7 +188,7 @@ export async function POST(request: NextRequest) {
         amount_xaf: amountXaf,
         amount_eur: amountEur,
         invoice_id: invoice.id,
-        invoice_number: invoice.invoice_number,
+        invoice_number: invoiceNumber,
         message: 'Redirection vers la page de paiement par carte',
       });
 
@@ -201,4 +205,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-

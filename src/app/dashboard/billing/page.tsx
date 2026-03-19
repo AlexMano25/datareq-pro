@@ -55,7 +55,19 @@ export default function BillingPage() {
       const supabase = createClient();
 
       const { data: { user } } = await supabase.auth.getUser();
-      const tid = subscription?.tenant_id || user?.user_metadata?.tenant_id;
+      if (!user) return;
+
+      // Get tenant_id: subscription > tenant_users table > user metadata
+      let tid = subscription?.tenant_id || null;
+      if (!tid) {
+        const { data: tenantUser } = await supabase
+          .from('tenant_users')
+          .select('tenant_id')
+          .eq('user_id', user.id)
+          .single();
+        if (tenantUser) tid = tenantUser.tenant_id;
+      }
+      if (!tid) tid = user.user_metadata?.tenant_id || null;
       if (tid) setTenant(tid);
 
       const { data: plansData } = await supabase.from('plans').select('*').order('price_monthly');
@@ -113,9 +125,15 @@ export default function BillingPage() {
     return sp ? sp.price_monthly / 100 : 0;
   };
 
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
   const submitPayment = async () => {
+    setSubmitError(null);
     const tid = tenant || subscription?.tenant_id;
-    if (!tid) return;
+    if (!tid) {
+      setSubmitError('Impossible de trouver votre compte. Veuillez vous reconnecter.');
+      return;
+    }
 
     const amount = getPayAmount();
     if (!amount || amount <= 0) return;
@@ -384,6 +402,9 @@ export default function BillingPage() {
                 </div>
               )}
 
+              {submitError && (
+                <div className="bg-red-50 text-red-700 p-3 rounded-lg mb-4 text-sm">{submitError}</div>
+              )}
               {payment.status === 'failed' && payment.error && (
                 <div className="bg-red-50 text-red-700 p-3 rounded-lg mb-4 text-sm">{payment.error}</div>
               )}
