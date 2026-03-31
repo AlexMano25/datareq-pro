@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://datareq.pro';
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://rgpd.manovende.com';
 
 export const viewport: Viewport = {
   width: 'device-width',
