@@ -19,7 +19,7 @@ export async function updateSession(request: NextRequest) {
     }
   );
   const { data: { user } } = await supabase.auth.getUser();
-  const publicPaths = ['/login', '/register', '/f/', '/api/public', '/api/auth', '/api/webhooks', '/api/payments', '/pricing', '/legal', '/about', '/features', '/contact'];
+  const publicPaths = ['/login', '/register', '/auth/callback', '/f/', '/api/public', '/api/auth', '/api/webhooks', '/api/payments', '/pricing', '/legal', '/about', '/features', '/contact'];
   const isPublicPath = request.nextUrl.pathname === '/' || publicPaths.some(p => request.nextUrl.pathname.startsWith(p));
   if (!user && !isPublicPath) {
     const url = request.nextUrl.clone();

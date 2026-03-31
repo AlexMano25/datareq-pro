@@ -2,7 +2,15 @@ import Link from 'next/link';
 import PublicNav from '@/components/PublicNav';
 import PublicFooter from '@/components/PublicFooter';
 
-export const metadata = { title: 'Fonctionnalités - DataReq Pro', description: 'Toutes les fonctionnalités de DataReq Pro pour la conformité données' };
+export const metadata = {
+  title: 'Fonctionnalites — Formulaires RGPD, Pseudonymisation, Audit',
+  description: 'Formulaires dynamiques, pseudonymisation automatique, gestion des demandes RGPD, audit trail, multi-tenant securise. Toutes les fonctionnalites de DataReq Pro.',
+  alternates: { canonical: '/features' },
+  openGraph: {
+    title: 'Fonctionnalites DataReq Pro — Conformite donnees complete',
+    description: 'Formulaires securises, pseudonymisation auto, droits RGPD, audit trail. Tout pour la conformite donnees.',
+  },
+};
 
 const features = [
   {

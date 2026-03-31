@@ -2,7 +2,11 @@ import Link from 'next/link';
 import PublicNav from '@/components/PublicNav';
 import PublicFooter from '@/components/PublicFooter';
 
-export const metadata = { title: 'Tarifs - DataReq Pro', description: 'Plans tarifaires DataReq Pro - Conformité RGPD accessible' };
+export const metadata = {
+  title: 'Tarifs & Plans - Conformite RGPD a partir de 49 EUR/mois',
+  description: 'Plans DataReq Pro : Starter 49 EUR, Pro 149 EUR, Enterprise sur devis. Essai gratuit 14 jours sans carte bancaire. Hebergement EU, chiffrement AES-256.',
+  alternates: { canonical: '/pricing' },
+};
 
 const plans = [
   {
