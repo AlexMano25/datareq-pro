@@ -1,4 +1,4 @@
-import { createServerSupabase } from '@/lib/supabase/server';
+import { createServiceSupabase } from '@/lib/supabase/service';
 import { anonymizeField } from '@/lib/anonymize';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -6,7 +6,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pub
   try {
     const { publicToken } = await params;
     const body = await req.json();
-    const supabase = await createServerSupabase();
+    // Client service_role : le dépôt public est validé ici par le public_token
+    // (formulaire publié + public) ; l'insertion + le RETURNING n'ont donc pas
+    // besoin de policy SELECT pour le rôle anon.
+    const supabase = createServiceSupabase();
 
     // Find form by token
     const { data: form, error: formError } = await supabase

@@ -20,7 +20,7 @@ export default function CGVPage() {
       <p>Un essai gratuit de 14 jours calendaires est proposé pour les plans Starter et Pro. Aucune carte bancaire n'est requise. À l'issue de la période d'essai, le Client choisit un plan payant ou son compte est mis en pause sans suppression de données pendant 30 jours.</p>
 
       <h2>4. Commande et activation</h2>
-      <p>La commande est effectuée en ligne via le site datareq-pro.vercel.app. L'activation du Service est immédiate après validation du paiement ou début de l'essai gratuit. Un email de confirmation est envoyé au Client.</p>
+      <p>La commande est effectuée en ligne via le site rgpd.manovende.com. L'activation du Service est immédiate après validation du paiement ou début de l'essai gratuit. Un email de confirmation est envoyé au Client.</p>
 
       <h2>5. Facturation et paiement</h2>
       <p>La facturation est mensuelle ou annuelle selon le choix du Client. Le paiement s'effectue par carte bancaire (Visa, Mastercard, American Express) via Stripe. Les factures sont émises électroniquement et disponibles dans l'espace client. Elles sont conformes aux exigences légales françaises et européennes (mentions obligatoires, TVA).</p>

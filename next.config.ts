@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
+import path from "node:path";
 
 const nextConfig: NextConfig = {
+  // Build autonome pour le conteneur Docker (deploy/vps/Dockerfile)
+  output: 'standalone',
+  // Racine de traçage = ce dossier (évite qu'un lockfile parent ne déplace server.js)
+  outputFileTracingRoot: path.join(__dirname),
   poweredByHeader: false,
   compress: true,
   images: {

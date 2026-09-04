@@ -1,0 +1,49 @@
+# DataReq Pro — service web sur le VPS Hostinger
+# Emplacement conseillé : /opt/apps/datareq/docker-compose.yml
+# (le dépôt est cloné dans /opt/apps/datareq/app)
+#
+#   cd /opt/apps/datareq
+#   docker compose build && docker compose up -d
+#
+# Le conteneur rejoint le réseau de la stack Supabase (`supabase_default`) afin
+# que Caddy (déjà sur ce réseau) puisse faire reverse_proxy datareq-web:3000.
+
+services:
+  datareq-web:
+    build:
+      context: ./app
+      dockerfile: deploy/vps/Dockerfile
+      args:
+        # Inlinées au build (NEXT_PUBLIC_*) — lues depuis le .env à côté de ce fichier
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-https://datareq-db.manovende.com}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://rgpd.manovende.com}
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://rgpd.manovende.com}
+    image: datareq-web:latest
+    container_name: datareq-web
+    restart: unless-stopped
+    env_file:
+      - /opt/apps/datareq/app/api.env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+    expose:
+      - "3000"
+    networks:
+      - supabase_default
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/webhooks/campay"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  supabase_default:
+    external: true

@@ -14,7 +14,7 @@ export default function MentionsPage() {
           <div><span className="text-gray-500">Siège social :</span><br/><strong className="text-gray-900">Kinshasa, République Démocratique du Congo</strong></div>
           <div><span className="text-gray-500">Président Directeur Général :</span><br/><strong className="text-gray-900">Alex Motho</strong></div>
           <div><span className="text-gray-500">Email :</span><br/><strong className="text-gray-900">contact@manovende.com</strong></div>
-          <div><span className="text-gray-500">Site web :</span><br/><strong className="text-gray-900">https://datareq-pro.vercel.app</strong></div>
+          <div><span className="text-gray-500">Site web :</span><br/><strong className="text-gray-900">https://rgpd.manovende.com</strong></div>
           <div><span className="text-gray-500">RCCM :</span><br/><strong className="text-gray-900">En cours d'immatriculation</strong></div>
           <div><span className="text-gray-500">ID National :</span><br/><strong className="text-gray-900">En cours d'attribution</strong></div>
         </div>
