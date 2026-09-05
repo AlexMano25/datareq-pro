@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { initCollect, getPaymentLink, eurToXaf } from '@/lib/campay';
+import { getPaymentLink, eurToXaf } from '@/lib/campay';
 
 // Lazy initialization to avoid build-time crash when env vars aren't available
 function getSupabase() {
@@ -11,6 +11,8 @@ function getSupabase() {
   );
 }
 
+// POST /api/payments/campay — carte bancaire uniquement (lien de paiement CamPay).
+// Règle métier : Orange Money / MTN MoMo passent par /api/payments/ynote (push USSD).
 export async function POST(request: NextRequest) {
   try {
     const supabase = getSupabase();
@@ -19,8 +21,8 @@ export async function POST(request: NextRequest) {
       tenant_id,
       subscription_id,  // optional for deposits
       plan_id,           // optional for deposits
-      payment_method,    // 'mobile_money', 'orange_money', 'card'
-      phone_number,      // required for mobile money
+      payment_method,    // 'card' uniquement
+      phone_number,      // optionnel (transmis à CamPay pour le lien)
       first_name,
       last_name,
       email,
@@ -31,6 +33,13 @@ export async function POST(request: NextRequest) {
     if (!tenant_id || !payment_method) {
       return NextResponse.json(
         { error: 'Champs requis : tenant_id, payment_method' },
+        { status: 400 }
+      );
+    }
+
+    if (payment_method !== 'card') {
+      return NextResponse.json(
+        { error: 'Orange Money et MTN MoMo sont traités via /api/payments/ynote. CamPay est réservé à la carte bancaire.' },
         { status: 400 }
       );
     }
@@ -64,9 +73,7 @@ export async function POST(request: NextRequest) {
     // Generate invoice number
     const invoiceNumber = `INV-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
 
-    // Normalize payment method for storage
-    const isMobileMoney = payment_method === 'mobile_money' || payment_method === 'orange_money';
-    const storedPaymentMethod = isMobileMoney ? 'campay_om' : 'campay_card';
+    const storedPaymentMethod = 'campay_card';
     const invoiceDescription = description || (plan ? `Abonnement DataReq Pro - Plan ${planName}` : `Recharge compte DataReq Pro`);
 
     // Create invoice in database - use correct column names matching DB schema
@@ -78,6 +85,7 @@ export async function POST(request: NextRequest) {
       status: 'open',                 // DB CHECK: draft/open/paid/void/uncollectible (NOT 'pending')
       description: invoiceDescription,
       payment_method: storedPaymentMethod,
+      provider: 'campay',
       external_reference: externalRef,
     };
     if (subscription_id) invoiceData.subscription_id = subscription_id;
@@ -98,53 +106,7 @@ export async function POST(request: NextRequest) {
 
     let result;
 
-    if (isMobileMoney) {
-      // Mobile Money collection via USSD push (Orange or MTN - CamPay auto-detects)
-      if (!phone_number) {
-        return NextResponse.json(
-          { error: 'Numéro de téléphone requis pour le paiement Mobile Money' },
-          { status: 400 }
-        );
-      }
-
-      // Ensure phone starts with 237
-      const formattedPhone = phone_number.startsWith('237')
-        ? phone_number
-        : `237${phone_number}`;
-
-      result = await initCollect({
-        amount: String(amountXaf),
-        currency: 'XAF',
-        from: formattedPhone,
-        description: `DataReq Pro - ${planName} (Facture ${invoiceNumber})`,
-        external_reference: externalRef,
-      });
-
-      // Update invoice with CamPay reference
-      if (result.reference) {
-        await supabase
-          .from('invoices')
-          .update({
-            campay_reference: result.reference,
-            amount_xaf: amountXaf,
-          })
-          .eq('id', invoice.id);
-      }
-
-      return NextResponse.json({
-        success: true,
-        type: 'ussd_push',
-        reference: result.reference,
-        ussd_code: result.ussd_code,
-        operator: result.operator,
-        amount_xaf: amountXaf,
-        amount_eur: amountEur,
-        invoice_id: invoice.id,
-        invoice_number: invoiceNumber,
-        message: 'Veuillez confirmer le paiement sur votre téléphone',
-      });
-
-    } else if (payment_method === 'card') {
+    if (payment_method === 'card') {
       // Card payment via payment link
       if (!first_name || !last_name || !email) {
         return NextResponse.json(
@@ -194,7 +156,7 @@ export async function POST(request: NextRequest) {
 
     } else {
       return NextResponse.json(
-        { error: 'Méthode de paiement invalide. Utilisez : mobile_money, orange_money, card' },
+        { error: 'Méthode de paiement invalide. Utilisez : card' },
         { status: 400 }
       );
     }

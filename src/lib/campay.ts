@@ -1,6 +1,7 @@
 // CamPay Payment Gateway Integration
-// Supports: Orange Money (collect) + Card payments (payment link)
-// MTN Money remains on Y-Note
+// Règle métier : CamPay est réservé à la carte bancaire (lien de paiement get_payment_link).
+// Orange Money et MTN Mobile Money passent par Y-Note (src/lib/ynote.ts).
+// initCollect reste disponible mais n'est plus utilisé par les routes de paiement.
 
 const CAMPAY_BASE_URL = process.env.CAMPAY_ENVIRONMENT === 'PROD'
   ? 'https://www.campay.net'

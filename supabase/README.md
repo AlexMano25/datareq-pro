@@ -28,6 +28,16 @@ docker exec -i supabase-db psql -U supabase_admin -d datareq -v ON_ERROR_STOP=1 
 Le script est **rejouable** (`if not exists`, `or replace`, `drop policy if exists`,
 seeds en `on conflict`). Il se termine par `notify pgrst, 'reload schema';`.
 
+Puis la migration Y-Note (Orange Money / MTN MoMo), rejouable elle aussi :
+
+```bash
+docker exec -i supabase-db psql -U supabase_admin -d datareq -v ON_ERROR_STOP=1 \
+  < supabase/migrations/20260906100000_ynote.sql
+```
+
+Elle ajoute à `invoices` : `provider` (`campay` | `ynote` | `manual`), `ynote_message_id`,
+`provider_status`, `provider_payload`, et étend `payment_method` à `ynote_om` / `ynote_momo`.
+
 Il crée :
 
 | Élément | Détail |
@@ -90,7 +100,7 @@ SQL
 
 - `plans.price_monthly` est en **centimes d'euro** (le code fait `/ 100` puis convertit
   en FCFA au taux fixe 655,957 pour CamPay). `-1` = illimité.
-- `invoices.amount` : centimes d'euro ; `invoices.amount_xaf` : montant CamPay.
+- `invoices.amount` : centimes d'euro ; `invoices.amount_xaf` : montant envoyé au fournisseur (CamPay carte / Y-Note OM-MoMo).
   Statuts : `draft | open | paid | void | uncollectible`.
 - `subscriptions` : une ligne par tenant (`unique (tenant_id)`), statuts
   `trialing | active | past_due | canceled | expired | suspended`.
