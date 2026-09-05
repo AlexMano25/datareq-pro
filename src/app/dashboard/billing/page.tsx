@@ -2,10 +2,22 @@
 
 import { useState, useEffect } from 'react';
 import { useSubscription } from '@/lib/hooks/useSubscription';
-import { usePayment } from '@/lib/hooks/usePayment';
+import { usePayment, type PaymentMethod } from '@/lib/hooks/usePayment';
+import { detectCmOperator, isValidCmMobile, OPERATOR_LABELS, type CmOperator } from '@/lib/cm-operators';
 
-type PaymentMethod = 'mobile_money' | 'card';
 type ModalMode = 'plan' | 'deposit';
+
+const OPERATOR_TO_METHOD: Record<CmOperator, PaymentMethod> = { orange: 'orange_money', mtn: 'mtn_momo' };
+const METHOD_TO_OPERATOR: Partial<Record<PaymentMethod, CmOperator>> = { orange_money: 'orange', mtn_momo: 'mtn' };
+
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  ynote_om: '🟠 Orange Money',
+  ynote_momo: '🟡 MTN MoMo',
+  campay_om: '📱 Mobile Money (CamPay)',
+  campay_momo: '📱 Mobile Money (CamPay)',
+  campay_card: '💳 Carte bancaire',
+  manual: 'Manuel',
+};
 
 interface PlanData {
   id: string;
@@ -39,7 +51,7 @@ export default function BillingPage() {
   const [plans, setPlans] = useState<PlanData[]>([]);
   const [invoices, setInvoices] = useState<InvoiceData[]>([]);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('mobile_money');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('orange_money');
   const [phone, setPhone] = useState('');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [modalMode, setModalMode] = useState<ModalMode>('plan');
@@ -92,7 +104,7 @@ export default function BillingPage() {
     const params = new URLSearchParams(window.location.search);
     const ps = params.get('payment');
     const ref = params.get('ref');
-    if (ps === 'success' && ref) payment.checkStatus(ref);
+    if (ps === 'success' && ref) payment.checkStatus(ref, { provider: 'campay', byExternalRef: true });
   }, []);
 
   // Calculate balance from invoices (amount is in cents)
@@ -117,6 +129,20 @@ export default function BillingPage() {
     payment.reset();
   };
 
+  const isMobileMethod = paymentMethod === 'orange_money' || paymentMethod === 'mtn_momo';
+  const detectedOperator = detectCmOperator(phone);
+  const selectedOperator = METHOD_TO_OPERATOR[paymentMethod];
+  const operatorMismatch = isMobileMethod && detectedOperator !== null && detectedOperator !== selectedOperator;
+  const phoneValid = isValidCmMobile(phone);
+
+  // Pré-sélection de l'opérateur d'après le préfixe (MTN 67/650-654/680-684, Orange 69/655-659/685-689)
+  const handlePhoneChange = (raw: string) => {
+    const digits = raw.replace(/\D/g, '').slice(0, 9);
+    setPhone(digits);
+    const op = detectCmOperator(digits);
+    if (op && paymentMethod !== 'card') setPaymentMethod(OPERATOR_TO_METHOD[op]);
+  };
+
   const getPayAmount = (): number => {
     if (modalMode === 'deposit') {
       return customAmount ? parseFloat(customAmount) : depositAmount;
@@ -138,24 +164,22 @@ export default function BillingPage() {
     const amount = getPayAmount();
     if (!amount || amount <= 0) return;
 
-    const isMobile = paymentMethod === 'mobile_money';
-
-    if (isMobile && phone.length < 9) return;
-    if (!isMobile && (!cardName || !cardEmail)) return;
+    if (isMobileMethod && (!phoneValid || operatorMismatch)) return;
+    if (!isMobileMethod && (!cardName || !cardEmail)) return;
 
     const nameParts = cardName.split(' ');
-    const firstName = isMobile ? 'Client' : (nameParts[0] || 'Client');
-    const lastName = isMobile ? 'DataReq' : (nameParts.slice(1).join(' ') || 'DataReq');
+    const firstName = isMobileMethod ? 'Client' : (nameParts[0] || 'Client');
+    const lastName = isMobileMethod ? 'DataReq' : (nameParts.slice(1).join(' ') || 'DataReq');
 
     await payment.initiatePayment({
       tenant_id: tid,
       subscription_id: subscription?.id,
       plan_id: modalMode === 'plan' ? selectedPlan || undefined : undefined,
       payment_method: paymentMethod,
-      phone_number: phone || undefined,
+      phone_number: isMobileMethod ? phone : undefined,
       first_name: firstName,
       last_name: lastName,
-      email: isMobile ? 'client@datareq.pro' : cardEmail,
+      email: isMobileMethod ? undefined : cardEmail,
       amount_eur: amount,
       description: modalMode === 'deposit' ? `Recharge compte - ${amount} EUR` : undefined,
     });
@@ -326,7 +350,7 @@ export default function BillingPage() {
                     <td className="py-2 pr-4">{(inv.amount / 100).toFixed(2)} €</td>
                     <td className="py-2 pr-4">{inv.amount_xaf ? `${inv.amount_xaf.toLocaleString()} FCFA` : '-'}</td>
                     <td className="py-2 pr-4 text-xs">
-                      {inv.payment_method === 'campay_om' ? '🟠 Mobile Money' : inv.payment_method === 'campay_card' ? '💳 Carte' : '-'}
+                      {inv.payment_method ? (PAYMENT_METHOD_LABELS[inv.payment_method] || inv.payment_method) : '-'}
                     </td>
                     <td className="py-2">
                       <span className={`px-2 py-0.5 rounded text-xs ${inv.status === 'paid' ? 'bg-green-100 text-green-800' : inv.status === 'open' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
@@ -412,12 +436,20 @@ export default function BillingPage() {
               {/* Payment method */}
               <div className="space-y-2 mb-4">
                 <label className="text-sm font-medium text-gray-700">Moyen de paiement</label>
-                <label className={`flex items-center p-3 border rounded-lg cursor-pointer ${paymentMethod === 'mobile_money' ? 'border-orange-500 bg-orange-50' : 'border-gray-200'}`}>
-                  <input type="radio" name="pm" value="mobile_money" checked={paymentMethod === 'mobile_money'} onChange={() => setPaymentMethod('mobile_money')} className="mr-3" />
-                  <span className="text-xl mr-2">📱</span>
+                <label className={`flex items-center p-3 border rounded-lg cursor-pointer ${paymentMethod === 'orange_money' ? 'border-orange-500 bg-orange-50' : 'border-gray-200'}`}>
+                  <input type="radio" name="pm" value="orange_money" checked={paymentMethod === 'orange_money'} onChange={() => setPaymentMethod('orange_money')} className="mr-3" />
+                  <span className="text-xl mr-2">🟠</span>
                   <div>
-                    <p className="font-medium text-sm">Mobile Money</p>
-                    <p className="text-xs text-gray-500">Orange Money ou MTN MoMo - CamPay détecte automatiquement</p>
+                    <p className="font-medium text-sm">Orange Money</p>
+                    <p className="text-xs text-gray-500">Validation USSD sur votre téléphone (Y-Note)</p>
+                  </div>
+                </label>
+                <label className={`flex items-center p-3 border rounded-lg cursor-pointer ${paymentMethod === 'mtn_momo' ? 'border-yellow-500 bg-yellow-50' : 'border-gray-200'}`}>
+                  <input type="radio" name="pm" value="mtn_momo" checked={paymentMethod === 'mtn_momo'} onChange={() => setPaymentMethod('mtn_momo')} className="mr-3" />
+                  <span className="text-xl mr-2">🟡</span>
+                  <div>
+                    <p className="font-medium text-sm">MTN Mobile Money</p>
+                    <p className="text-xs text-gray-500">Validation USSD sur votre téléphone (Y-Note)</p>
                   </div>
                 </label>
                 <label className={`flex items-center p-3 border rounded-lg cursor-pointer ${paymentMethod === 'card' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
@@ -425,27 +457,38 @@ export default function BillingPage() {
                   <span className="text-xl mr-2">💳</span>
                   <div>
                     <p className="font-medium text-sm">Carte bancaire</p>
-                    <p className="text-xs text-gray-500">Visa, Mastercard - CamPay</p>
+                    <p className="text-xs text-gray-500">Visa, Mastercard — paiement sécurisé via CamPay</p>
                   </div>
                 </label>
               </div>
 
               {/* Phone number for mobile money */}
-              {paymentMethod === 'mobile_money' && (
+              {isMobileMethod && (
                 <div className="mb-4">
-                  <label className="text-sm font-medium text-gray-700 block mb-1">Numéro de téléphone</label>
+                  <label className="text-sm font-medium text-gray-700 block mb-1">
+                    Numéro {paymentMethod === 'mtn_momo' ? 'MTN Mobile Money' : 'Orange Money'}
+                  </label>
                   <div className="flex">
                     <span className="bg-gray-100 border border-r-0 border-gray-300 rounded-l-lg px-3 py-2 text-sm text-gray-600">+237</span>
                     <input
                       type="tel"
                       value={phone}
-                      onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
+                      onChange={(e) => handlePhoneChange(e.target.value)}
                       placeholder="6XX XXX XXX"
-                      className="flex-1 border border-gray-300 rounded-r-lg px-3 py-2 text-sm"
+                      className={`flex-1 border rounded-r-lg px-3 py-2 text-sm ${operatorMismatch ? 'border-red-400' : 'border-gray-300'}`}
                       maxLength={9}
+                      inputMode="numeric"
                     />
                   </div>
-                  <p className="text-xs text-gray-400 mt-1">Orange (69x, 65x) ou MTN (67x, 68x)</p>
+                  {operatorMismatch && detectedOperator ? (
+                    <p className="text-xs text-red-600 mt-1">
+                      Ce numéro semble être un numéro {OPERATOR_LABELS[detectedOperator]}. Sélectionnez l’opérateur correspondant.
+                    </p>
+                  ) : detectedOperator ? (
+                    <p className="text-xs text-green-600 mt-1">Opérateur détecté : {OPERATOR_LABELS[detectedOperator]}</p>
+                  ) : (
+                    <p className="text-xs text-gray-400 mt-1">MTN : 67x, 650-654, 680-684 · Orange : 69x, 655-659, 685-689</p>
+                  )}
                 </div>
               )}
 
@@ -466,7 +509,7 @@ export default function BillingPage() {
               <button
                 onClick={submitPayment}
                 disabled={
-                  (paymentMethod === 'mobile_money' && phone.length < 9) ||
+                  (isMobileMethod && (!phoneValid || operatorMismatch)) ||
                   (paymentMethod === 'card' && (!cardName || !cardEmail)) ||
                   getPayAmount() <= 0
                 }
@@ -479,15 +522,16 @@ export default function BillingPage() {
             </>) : payment.status === 'processing' ? (
               <div className="text-center py-8">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
-                <p className="text-gray-600">Connexion à CamPay...</p>
+                <p className="text-gray-600">Connexion à {payment.provider === 'ynote' ? 'Y-Note' : 'CamPay'}...</p>
                 <p className="text-xs text-gray-400 mt-2">Veuillez patienter quelques secondes</p>
               </div>
             ) : payment.status === 'pending' ? (
               <div className="text-center py-6">
-                <div className="animate-pulse text-5xl mb-4">{paymentMethod === 'mobile_money' ? '📱' : '💳'}</div>
+                <div className="animate-pulse text-5xl mb-4">{paymentMethod === 'mtn_momo' ? '🟡' : paymentMethod === 'orange_money' ? '🟠' : '💳'}</div>
                 <p className="font-medium text-lg mb-2">
-                  {paymentMethod === 'mobile_money' ? 'Confirmez sur votre téléphone' : 'Finalisez le paiement par carte'}
+                  {isMobileMethod ? 'Confirmez sur votre téléphone' : 'Finalisez le paiement par carte'}
                 </p>
+                {payment.message && <p className="text-sm text-gray-500 mb-2">{payment.message}</p>}
                 {payment.ussdCode && <p className="text-sm text-gray-500 mb-2">Composez {payment.ussdCode} si besoin</p>}
                 {payment.amountXaf && <p className="text-blue-600 font-bold">{payment.amountXaf.toLocaleString()} FCFA</p>}
                 <div className="mt-4 flex items-center justify-center gap-2 text-sm text-gray-500">

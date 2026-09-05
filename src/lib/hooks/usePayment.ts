@@ -2,45 +2,67 @@
 
 import { useState, useCallback, useRef } from 'react';
 
-type PaymentMethod = 'mobile_money' | 'orange_money' | 'card';
+// Règle métier : carte bancaire → CamPay (lien de paiement),
+//                Orange Money / MTN MoMo → Y-Note (push USSD).
+export type PaymentMethod = 'orange_money' | 'mtn_momo' | 'card';
+export type PaymentProvider = 'campay' | 'ynote';
 type PaymentStatus = 'idle' | 'processing' | 'pending' | 'success' | 'failed';
+
+export const PROVIDER_FOR_METHOD: Record<PaymentMethod, PaymentProvider> = {
+  orange_money: 'ynote',
+  mtn_momo: 'ynote',
+  card: 'campay',
+};
 
 interface PaymentState {
   status: PaymentStatus;
+  provider: PaymentProvider | null;
   reference: string | null;
+  externalReference: string | null;
   paymentLink: string | null;
   ussdCode: string | null;
   invoiceNumber: string | null;
   amountXaf: number | null;
   amountEur: number | null;
+  message: string | null;
   error: string | null;
 }
 
 interface InitPaymentParams {
   tenant_id: string;
-  subscription_id?: string;  // optional for deposits
-  plan_id?: string;          // optional for deposits
+  subscription_id?: string;  // optionnel (recharge)
+  plan_id?: string;          // optionnel (recharge)
   payment_method: PaymentMethod;
-  phone_number?: string;
-  first_name?: string;
-  last_name?: string;
-  email?: string;
-  amount_eur: number;        // required
-  description?: string;      // optional description
+  phone_number?: string;     // requis pour Orange Money / MTN MoMo
+  first_name?: string;       // carte
+  last_name?: string;        // carte
+  email?: string;            // carte
+  amount_eur: number;
+  description?: string;
+}
+
+const INITIAL_STATE: PaymentState = {
+  status: 'idle',
+  provider: null,
+  reference: null,
+  externalReference: null,
+  paymentLink: null,
+  ussdCode: null,
+  invoiceNumber: null,
+  amountXaf: null,
+  amountEur: null,
+  message: null,
+  error: null,
+};
+
+interface CheckStatusOptions {
+  provider?: PaymentProvider;
+  /** true si `ref` est la référence externe (order_id / external_reference) et non celle du fournisseur */
+  byExternalRef?: boolean;
 }
 
 export function usePayment() {
-  const [state, setState] = useState<PaymentState>({
-    status: 'idle',
-    reference: null,
-    paymentLink: null,
-    ussdCode: null,
-    invoiceNumber: null,
-    amountXaf: null,
-    amountEur: null,
-    error: null,
-  });
-
+  const [state, setState] = useState<PaymentState>(INITIAL_STATE);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPolling = useCallback(() => {
@@ -50,9 +72,11 @@ export function usePayment() {
     }
   }, []);
 
-  const checkStatus = useCallback(async (reference: string) => {
+  const checkStatus = useCallback(async (ref: string, opts: CheckStatusOptions = {}) => {
+    const provider = opts.provider || 'campay';
+    const param = opts.byExternalRef ? 'external_ref' : 'reference';
     try {
-      const res = await fetch(`/api/payments/campay/status?reference=${reference}`);
+      const res = await fetch(`/api/payments/${provider}/status?${param}=${encodeURIComponent(ref)}`);
       const data = await res.json();
 
       if (data.status === 'SUCCESSFUL') {
@@ -60,7 +84,9 @@ export function usePayment() {
         setState(prev => ({
           ...prev,
           status: 'success',
+          provider,
           invoiceNumber: data.invoice_number,
+          message: data.message || null,
           error: null,
         }));
         return true;
@@ -69,31 +95,32 @@ export function usePayment() {
         setState(prev => ({
           ...prev,
           status: 'failed',
-          error: data.message || 'Le paiement a \u00E9chou\u00E9',
+          provider,
+          error: data.message || 'Le paiement a échoué',
         }));
         return true;
       }
-      return false; // still pending
+      return false; // toujours en attente
     } catch {
       return false;
     }
   }, [stopPolling]);
 
-  const startPolling = useCallback((reference: string) => {
+  const startPolling = useCallback((reference: string, provider: PaymentProvider) => {
     stopPolling();
     let attempts = 0;
-    const maxAttempts = 40; // 40 x 5s = ~3 minutes
+    const maxAttempts = 40; // 40 x 5 s ≈ 3 min
 
     pollingRef.current = setInterval(async () => {
       attempts++;
-      const done = await checkStatus(reference);
+      const done = await checkStatus(reference, { provider });
       if (done || attempts >= maxAttempts) {
         stopPolling();
-        if (attempts >= maxAttempts) {
+        if (!done && attempts >= maxAttempts) {
           setState(prev => ({
             ...prev,
             status: 'failed',
-            error: 'D\u00E9lai d\u2019attente d\u00E9pass\u00E9. V\u00E9rifiez le statut dans votre historique.',
+            error: 'Délai d’attente dépassé. Vérifiez le statut dans votre historique de facturation.',
           }));
         }
       }
@@ -101,23 +128,34 @@ export function usePayment() {
   }, [checkStatus, stopPolling]);
 
   const initiatePayment = useCallback(async (params: InitPaymentParams) => {
-    setState({
-      status: 'processing',
-      reference: null,
-      paymentLink: null,
-      ussdCode: null,
-      invoiceNumber: null,
-      amountXaf: null,
-      amountEur: null,
-      error: null,
-    });
+    const provider = PROVIDER_FOR_METHOD[params.payment_method];
+    setState({ ...INITIAL_STATE, status: 'processing', provider });
 
     try {
-      const res = await fetch('/api/payments/campay', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params),
-      });
+      let res: Response;
+      if (provider === 'ynote') {
+        // Orange Money / MTN MoMo → Y-Note (push USSD)
+        res = await fetch('/api/payments/ynote', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tenant_id: params.tenant_id,
+            subscription_id: params.subscription_id,
+            plan_id: params.plan_id,
+            operator: params.payment_method === 'mtn_momo' ? 'mtn' : 'orange',
+            phone_number: params.phone_number,
+            amount_eur: params.amount_eur,
+            description: params.description,
+          }),
+        });
+      } else {
+        // Carte bancaire → CamPay (lien de paiement)
+        res = await fetch('/api/payments/campay', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...params, payment_method: 'card' }),
+        });
+      }
 
       const data = await res.json();
 
@@ -125,46 +163,42 @@ export function usePayment() {
         setState(prev => ({
           ...prev,
           status: 'failed',
-          error: data.error || 'Erreur lors de l\u2019initiation du paiement',
+          error: data.error || 'Erreur lors de l’initiation du paiement',
         }));
         return;
       }
 
       if (data.type === 'payment_link' && data.link) {
-        // Card payment - redirect to CamPay payment page
         setState(prev => ({
           ...prev,
           status: 'pending',
+          provider: 'campay',
           reference: data.reference,
           paymentLink: data.link,
           invoiceNumber: data.invoice_number,
           amountXaf: data.amount_xaf,
           amountEur: data.amount_eur,
+          message: data.message || null,
         }));
-        // Open payment link in new tab
         window.open(data.link, '_blank');
-        // Start polling for status
-        if (data.reference) {
-          startPolling(data.reference);
-        }
+        if (data.reference) startPolling(data.reference, 'campay');
 
       } else if (data.type === 'ussd_push') {
-        // Mobile Money - USSD push sent to phone (Orange or MTN)
         setState(prev => ({
           ...prev,
           status: 'pending',
+          provider: 'ynote',
           reference: data.reference,
-          ussdCode: data.ussd_code,
+          externalReference: data.external_reference || null,
+          ussdCode: data.ussd_code || null,
           invoiceNumber: data.invoice_number,
           amountXaf: data.amount_xaf,
           amountEur: data.amount_eur,
+          message: data.message || null,
         }));
-        // Start polling for confirmation
-        if (data.reference) {
-          startPolling(data.reference);
-        }
+        if (data.reference) startPolling(data.reference, 'ynote');
+
       } else {
-        // Unknown response type - show error instead of hanging
         setState(prev => ({
           ...prev,
           status: 'failed',
@@ -173,35 +207,21 @@ export function usePayment() {
       }
 
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Erreur r\u00E9seau';
-      setState(prev => ({
-        ...prev,
-        status: 'failed',
-        error: message,
-      }));
+      const message = err instanceof Error ? err.message : 'Erreur réseau';
+      setState(prev => ({ ...prev, status: 'failed', error: message }));
     }
   }, [startPolling]);
 
   const reset = useCallback(() => {
     stopPolling();
-    setState({
-      status: 'idle',
-      reference: null,
-      paymentLink: null,
-      ussdCode: null,
-      invoiceNumber: null,
-      amountXaf: null,
-      amountEur: null,
-      error: null,
-    });
+    setState(INITIAL_STATE);
   }, [stopPolling]);
 
   return {
     ...state,
     initiatePayment,
-    checkStatus: (ref: string) => checkStatus(ref),
+    checkStatus,
     reset,
     stopPolling,
   };
 }
-
