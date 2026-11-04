@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getYNotePaymentStatus } from '@/lib/ynote';
+import { getYNotePaymentStatus, amountMatches, sanitizeYNotePayload } from '@/lib/ynote';
+import type { CmOperator } from '@/lib/cm-operators';
 import { getServiceSupabase, markInvoicePaid, markInvoiceFailed } from '@/lib/billing/settle';
 
 // GET /api/payments/ynote/status?reference=<MessageId> | ?external_ref=<order_id>
@@ -51,12 +52,28 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const tx = await getYNotePaymentStatus(invoice.ynote_message_id);
+    // La bonne valeur `payment_method` dépend de l'opérateur enregistré à l'initiation.
+    const operator: CmOperator = invoice.payment_method === 'ynote_om' ? 'orange' : 'mtn';
+    const tx = await getYNotePaymentStatus(invoice.ynote_message_id, operator);
+
+    // Le montant relu doit correspondre au montant demandé : sinon on ne valide pas.
+    if (tx.status === 'SUCCESSFUL' && !amountMatches(invoice.amount_xaf, tx.amount)) {
+      console.error(
+        'Y-Note montant incohérent (facture %s) : attendu %s FCFA, relu %s FCFA — facture NON validée',
+        invoice.invoice_number,
+        invoice.amount_xaf,
+        tx.amount
+      );
+      return NextResponse.json(
+        { error: 'Montant du paiement incohérent — vérification manuelle requise' },
+        { status: 409 }
+      );
+    }
 
     if (tx.status === 'SUCCESSFUL') {
       await markInvoicePaid(supabase, invoice, {
         provider_status: tx.providerStatus,
-        provider_payload: tx.raw,
+        provider_payload: sanitizeYNotePayload(tx.raw, invoice.ynote_message_id),
       });
       return NextResponse.json({
         status: 'SUCCESSFUL',
@@ -74,7 +91,7 @@ export async function GET(request: NextRequest) {
     if (tx.status === 'FAILED') {
       await markInvoiceFailed(supabase, invoice, {
         provider_status: tx.providerStatus,
-        provider_payload: tx.raw,
+        provider_payload: sanitizeYNotePayload(tx.raw, invoice.ynote_message_id),
       });
       return NextResponse.json({
         status: 'FAILED',

@@ -3,9 +3,11 @@ import {
   getYNotePaymentStatus,
   extractYNoteMessageId,
   extractYNoteOrderId,
-  extractYNoteStatus,
   normalizeYNoteStatus,
+  amountMatches,
+  sanitizeYNotePayload,
 } from '@/lib/ynote';
+import type { CmOperator } from '@/lib/cm-operators';
 import { getServiceSupabase, markInvoicePaid, markInvoiceFailed } from '@/lib/billing/settle';
 
 // Webhook Y-Note (notifUrl) : https://rgpd.manovende.com/api/webhooks/ynote
@@ -21,8 +23,9 @@ export async function POST(request: NextRequest) {
     } catch {
       return NextResponse.json({ error: 'JSON invalide' }, { status: 400 });
     }
-    console.log('Y-Note webhook received:', JSON.stringify(payload).slice(0, 1000));
-
+    // ⚠️ Le corps de la notification n'est jamais journalisé : l'API Y-Note y
+    // réinjecte nos identifiants en clair dans ses messages d'erreur, et le champ
+    // `notifUrl` peut contenir notre jeton de webhook.
     const messageId = extractYNoteMessageId(payload);
     const orderId = extractYNoteOrderId(payload);
 
@@ -59,26 +62,35 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ message: 'Notification reçue (MessageId inconnu)', status: 'pending' });
     }
 
-    // Re-vérification auprès de Y-Note (source de vérité)
+    // Re-vérification auprès de Y-Note (source de vérité) : la bonne valeur
+    // `payment_method` dépend de l'opérateur enregistré à l'initiation.
+    const operator: CmOperator = invoice.payment_method === 'ynote_om' ? 'orange' : 'mtn';
     let verifiedStatus: 'PENDING' | 'SUCCESSFUL' | 'FAILED';
     let providerStatus: string;
     let providerPayload: Record<string, unknown>;
     try {
-      const tx = await getYNotePaymentStatus(effectiveMessageId);
+      const tx = await getYNotePaymentStatus(effectiveMessageId, operator);
       verifiedStatus = tx.status;
       providerStatus = tx.providerStatus;
       providerPayload = tx.raw;
+      // Le montant relu doit correspondre au montant demandé : sinon on ne valide pas.
+      if (verifiedStatus === 'SUCCESSFUL' && !amountMatches(invoice.amount_xaf, tx.amount)) {
+        console.error(
+          'Y-Note webhook : montant incohérent (facture %s) : attendu %s FCFA, relu %s FCFA — facture NON validée',
+          invoice.invoice_number,
+          invoice.amount_xaf,
+          tx.amount
+        );
+        return NextResponse.json({ message: 'Montant incohérent — vérification manuelle requise', status: 'pending' });
+      }
     } catch (err: unknown) {
-      // API indisponible : on ne confirme rien, on journalise le statut notifié
-      // et on laisse le polling / la prochaine notification finaliser.
-      const notified = extractYNoteStatus(payload);
-      console.error('Y-Note webhook: vérification impossible', err instanceof Error ? err.message : err);
+      // API indisponible : on ne confirme rien et on laisse le polling finaliser.
+      console.error('Y-Note webhook: vérification impossible', err instanceof Error ? err.message : 'erreur inconnue');
       await supabase
         .from('invoices')
         .update({
           ynote_message_id: effectiveMessageId,
-          provider_status: `UNVERIFIED:${notified || 'UNKNOWN'}`,
-          provider_payload: payload,
+          provider_status: 'UNVERIFIED',
         })
         .eq('id', invoice.id)
         .eq('status', 'open');
@@ -89,7 +101,7 @@ export async function POST(request: NextRequest) {
       const done = await markInvoicePaid(supabase, invoice, {
         ynote_message_id: effectiveMessageId,
         provider_status: providerStatus,
-        provider_payload: providerPayload,
+        provider_payload: sanitizeYNotePayload(providerPayload, effectiveMessageId),
       });
       console.log(`Y-Note webhook: paiement confirmé pour ${invoice.invoice_number} (transition ici: ${done})`);
       return NextResponse.json({ message: 'Paiement confirmé', invoice_number: invoice.invoice_number });
@@ -99,7 +111,7 @@ export async function POST(request: NextRequest) {
       await markInvoiceFailed(supabase, invoice, {
         ynote_message_id: effectiveMessageId,
         provider_status: providerStatus,
-        provider_payload: providerPayload,
+        provider_payload: sanitizeYNotePayload(providerPayload, effectiveMessageId),
       });
       console.log(`Y-Note webhook: paiement échoué pour ${invoice.invoice_number}`);
       return NextResponse.json({ message: 'Échec enregistré', invoice_number: invoice.invoice_number });
@@ -111,7 +123,7 @@ export async function POST(request: NextRequest) {
       .update({
         ynote_message_id: effectiveMessageId,
         provider_status: providerStatus,
-        provider_payload: payload,
+        provider_payload: sanitizeYNotePayload(providerPayload, effectiveMessageId),
       })
       .eq('id', invoice.id)
       .eq('status', 'open');

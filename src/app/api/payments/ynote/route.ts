@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eurToXaf } from '@/lib/campay';
-import { initYNotePayment } from '@/lib/ynote';
+import { initYNotePayment, sanitizeYNotePayload } from '@/lib/ynote';
 import { detectCmOperator, isValidCmMobile, toCmMsisdn, OPERATOR_LABELS, type CmOperator } from '@/lib/cm-operators';
 import { getServiceSupabase, markInvoiceFailed } from '@/lib/billing/settle';
 
@@ -140,7 +140,7 @@ export async function POST(request: NextRequest) {
       .update({
         ynote_message_id: result.messageId,
         provider_status: 'INITIATED',
-        provider_payload: result.raw,
+        provider_payload: sanitizeYNotePayload(result.raw, result.messageId),
       })
       .eq('id', invoice.id);
 
